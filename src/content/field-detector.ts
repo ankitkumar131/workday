@@ -50,8 +50,23 @@ export function isElementVisible(el: HTMLElement): boolean {
 }
 
 /**
- * Resolves the human-readable question or label text for a form control
- * without relying solely on placeholder text.
+ * Strips Workday screen-reader helper suffixes such as "current value is MM/YYYY",
+ * "Select One", "0 items selected", required asterisks, etc.
+ */
+function cleanLabelText(raw: string): string {
+  return raw
+    .replace(/\bcurrent value is\s+(mm\/yyyy|yyyy|dd\/mm\/yyyy|mm\/dd\/yyyy)\b/gi, "")
+    .replace(/\b\d+\s+items?\s+selected.*$/i, "")
+    .replace(/\bSelect One\b$/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/\s*\*\s*$/, "")
+    .trim();
+}
+
+/**
+ * Resolves the human-readable question or label text for a form control.
+ * Prioritizes the field's own <label> or Workday formLabel over concatenated
+ * aria-labelledby strings that include section headers or button state text.
  */
 export function extractFieldQuestionText(
   el: HTMLElement,
@@ -59,33 +74,21 @@ export function extractFieldQuestionText(
 ): string {
   const doc = el.ownerDocument || document;
 
-  // 1. aria-labelledby
-  const labelledBy = el.getAttribute("aria-labelledby");
-  if (labelledBy) {
-    const parts = labelledBy
-      .split(/\s+/)
-      .map((id) => doc.getElementById(id)?.textContent?.trim() || "")
-      .filter(Boolean);
-    if (parts.length > 0) {
-      return cleanLabelText(parts.join(" "));
-    }
-  }
-
-  // 2. Explicit <label for="id">
+  // 1. Explicit <label for="id">
   if (el.id) {
     try {
-      const explicitLabel = root.querySelector(
-        `label[for="${cssEscape(el.id)}"]`
-      );
+      const explicitLabel =
+        root.querySelector(`label[for="${cssEscape(el.id)}"]`) ||
+        doc.querySelector(`label[for="${cssEscape(el.id)}"]`);
       if (explicitLabel?.textContent?.trim()) {
         return cleanLabelText(explicitLabel.textContent);
       }
     } catch {
-      // Fallback if cssEscape not applicable
+      // ignore selector error
     }
   }
 
-  // 3. Wrapping <label>
+  // 2. Wrapping <label>
   const parentLabel = el.closest("label");
   if (parentLabel) {
     const clone = parentLabel.cloneNode(true) as HTMLElement;
@@ -96,26 +99,77 @@ export function extractFieldQuestionText(
     if (text) return cleanLabelText(text);
   }
 
-  // 4. aria-label
-  const ariaLabel = el.getAttribute("aria-label")?.trim();
-  if (ariaLabel) {
-    return cleanLabelText(ariaLabel);
-  }
-
-  // 5. Workday formField container or fieldset legend
+  // 3. Workday formField container's dedicated formLabel or legend
   const fieldContainer = el.closest(
     '[data-automation-id^="formField"], [data-wsa-field], .wsa-form-field, .form-group, fieldset'
   ) as HTMLElement | null;
 
   if (fieldContainer) {
-    const legend = fieldContainer.querySelector(
-      'legend, [data-automation-id="formLabel"], .form-label, label'
+    const dedicatedLabel = fieldContainer.querySelector(
+      '[data-automation-id="formLabel"], legend, .form-label'
     );
-    if (legend && !legend.contains(el) && legend.textContent?.trim()) {
-      return cleanLabelText(legend.textContent);
+    if (
+      dedicatedLabel &&
+      !dedicatedLabel.contains(el) &&
+      dedicatedLabel.textContent?.trim()
+    ) {
+      return cleanLabelText(dedicatedLabel.textContent);
     }
 
-    // Look for a question heading inside the container
+    // Check direct child label that is not a radio/checkbox option label
+    const labels = Array.from(fieldContainer.querySelectorAll("label"));
+    const mainLabel = labels.find((lbl) => {
+      if (lbl.contains(el)) return false;
+      const forId = lbl.getAttribute("for");
+      if (forId && forId !== el.id) {
+        const target = doc.getElementById(forId) as HTMLInputElement | null;
+        if (target && (target.type === "radio" || target.type === "checkbox")) {
+          return false;
+        }
+      }
+      return Boolean(lbl.textContent?.trim());
+    });
+    if (mainLabel?.textContent?.trim()) {
+      return cleanLabelText(mainLabel.textContent);
+    }
+  }
+
+  // 4. aria-labelledby (filtering out self-value nodes and generic section headers if a specific label ID exists)
+  const labelledBy = el.getAttribute("aria-labelledby");
+  if (labelledBy) {
+    const ids = labelledBy.split(/\s+/).filter(Boolean);
+    const nodes = ids
+      .map((id) => doc.getElementById(id))
+      .filter((n): n is HTMLElement => Boolean(n && n !== el));
+
+    // Prefer a node inside the same formField or a <label>/<legend> element
+    const specificLabelNode = nodes.find(
+      (n) =>
+        n.tagName === "LABEL" ||
+        n.tagName === "LEGEND" ||
+        n.getAttribute("data-automation-id") === "formLabel" ||
+        /-label$/i.test(n.id)
+    );
+    if (specificLabelNode?.textContent?.trim()) {
+      return cleanLabelText(specificLabelNode.textContent);
+    }
+
+    const parts = nodes
+      .map((n) => n.textContent?.trim() || "")
+      .filter(Boolean);
+    if (parts.length > 0) {
+      return cleanLabelText(parts.join(" "));
+    }
+  }
+
+  // 5. aria-label
+  const ariaLabel = el.getAttribute("aria-label")?.trim();
+  if (ariaLabel) {
+    return cleanLabelText(ariaLabel);
+  }
+
+  // 6. Heading or question text inside fieldContainer
+  if (fieldContainer) {
     const heading = fieldContainer.querySelector(
       "h3, h4, .field-question, [data-question-text]"
     );
@@ -124,7 +178,7 @@ export function extractFieldQuestionText(
     }
   }
 
-  // 6. Preceding sibling label or text element
+  // 7. Preceding sibling label or text element
   const prev = el.previousElementSibling;
   if (
     prev &&
@@ -137,30 +191,28 @@ export function extractFieldQuestionText(
     return cleanLabelText(prev.textContent);
   }
 
-  // 7. Fallback to Workday data-automation-id humanization
+  // 8. Fallback to Workday data-automation-id humanization
   const autoId =
     el.getAttribute("data-automation-id") ||
     fieldContainer?.getAttribute("data-automation-id") ||
     "";
-  if (autoId) {
+  if (
+    autoId &&
+    !/^(textInputBox|selectWidget|searchBox|radioBtn|checkboxPanel)$/i.test(
+      autoId
+    )
+  ) {
     const humanized = humanizeAutomationId(autoId);
     if (humanized) return humanized;
   }
 
-  // 8. Name attribute humanization (never placeholder alone)
+  // 9. Name attribute humanization
   const nameAttr = el.getAttribute("name");
   if (nameAttr) {
     return humanizeAutomationId(nameAttr);
   }
 
   return "";
-}
-
-function cleanLabelText(raw: string): string {
-  return raw
-    .replace(/\s+/g, " ")
-    .replace(/\s*\*\s*$/, "")
-    .trim();
 }
 
 export function humanizeAutomationId(id: string): string {
@@ -176,12 +228,14 @@ export function humanizeAutomationId(id: string): string {
 
 /**
  * Determines whether a field belongs to a repeatable section (Work Experience or Education)
- * and extracts its 0-based index.
+ * and extracts its 0-based index, supporting both data-automation-id attributes and
+ * Workday heading text ("Work Experience 1", "Education 1").
  */
 function detectSectionContext(el: HTMLElement): {
   sectionType: DetectedField["sectionType"];
   sectionIndex: number;
 } {
+  // Check explicit data-automation-id or class containers first
   const expItem = el.closest(
     '[data-automation-id^="workExperience"], [data-section-type="experience"], .work-experience-item'
   ) as HTMLElement | null;
@@ -189,6 +243,14 @@ function detectSectionContext(el: HTMLElement): {
     const idxAttr = expItem.getAttribute("data-section-index");
     if (idxAttr !== null && !Number.isNaN(Number(idxAttr))) {
       return { sectionType: "experience", sectionIndex: Number(idxAttr) };
+    }
+    const autoId = expItem.getAttribute("data-automation-id") || "";
+    const numMatch = autoId.match(/workExperience[-_]?(\d+)/i);
+    if (numMatch) {
+      return {
+        sectionType: "experience",
+        sectionIndex: Math.max(0, Number(numMatch[1]) - 1),
+      };
     }
     const parent = expItem.parentElement;
     if (parent) {
@@ -211,6 +273,14 @@ function detectSectionContext(el: HTMLElement): {
     if (idxAttr !== null && !Number.isNaN(Number(idxAttr))) {
       return { sectionType: "education", sectionIndex: Number(idxAttr) };
     }
+    const autoId = eduItem.getAttribute("data-automation-id") || "";
+    const numMatch = autoId.match(/education[-_]?(\d+)/i);
+    if (numMatch) {
+      return {
+        sectionType: "education",
+        sectionIndex: Math.max(0, Number(numMatch[1]) - 1),
+      };
+    }
     const parent = eduItem.parentElement;
     if (parent) {
       const siblings = Array.from(
@@ -222,6 +292,26 @@ function detectSectionContext(el: HTMLElement): {
       return { sectionType: "education", sectionIndex: Math.max(0, pos) };
     }
     return { sectionType: "education", sectionIndex: 0 };
+  }
+
+  // Fallback: walk up ancestor containers looking for headings like "Work Experience 1" or "Education 1"
+  let curr: HTMLElement | null = el.parentElement;
+  let depth = 0;
+  while (curr && depth < 7) {
+    const heading = curr.querySelector("h2, h3, h4, legend, [role='heading']");
+    const hText = heading?.textContent?.trim() || "";
+    const expMatch = hText.match(/\bWork\s+Experience\s*(\d+)?\b/i);
+    if (expMatch) {
+      const idx = expMatch[1] ? Math.max(0, Number(expMatch[1]) - 1) : 0;
+      return { sectionType: "experience", sectionIndex: idx };
+    }
+    const eduMatch = hText.match(/\bEducation\s*(\d+)?\b/i);
+    if (eduMatch) {
+      const idx = eduMatch[1] ? Math.max(0, Number(eduMatch[1]) - 1) : 0;
+      return { sectionType: "education", sectionIndex: idx };
+    }
+    curr = curr.parentElement;
+    depth++;
   }
 
   return { sectionType: "general", sectionIndex: 0 };
@@ -258,7 +348,7 @@ function extractValidationError(el: HTMLElement): string | undefined {
   return undefined;
 }
 
-function isRequiredField(el: HTMLElement, questionText: string): boolean {
+function isRequiredField(el: HTMLElement, rawQuestionOrLabel: string): boolean {
   if (el.hasAttribute("required")) return true;
   if (el.getAttribute("aria-required") === "true") return true;
   const container = el.closest(
@@ -267,10 +357,12 @@ function isRequiredField(el: HTMLElement, questionText: string): boolean {
   if (container) {
     if (container.getAttribute("aria-required") === "true") return true;
     const labelText =
-      container.querySelector("label, legend")?.textContent || "";
+      container.querySelector(
+        'label, legend, [data-automation-id="formLabel"]'
+      )?.textContent || "";
     if (labelText.includes("*")) return true;
   }
-  return /\*\s*$/.test(questionText);
+  return /\*/.test(rawQuestionOrLabel);
 }
 
 function isLegalDeclarationText(text: string): boolean {
@@ -281,22 +373,37 @@ function isSensitiveQuestionText(text: string): boolean {
   return SENSITIVE_QUESTION_PATTERNS.some((re) => re.test(text));
 }
 
+function resolveAutomationId(el: HTMLElement): string {
+  const own = el.getAttribute("data-automation-id") || "";
+  const container =
+    el
+      .closest('[data-automation-id^="formField"]')
+      ?.getAttribute("data-automation-id") ||
+    el.closest("[data-automation-id]")?.getAttribute("data-automation-id") ||
+    "";
+
+  if (
+    own &&
+    !/^(textInputBox|selectWidget|searchBox|radioBtn|checkboxPanel)$/i.test(own)
+  ) {
+    return own;
+  }
+  return container || own;
+}
+
 function computeFieldFingerprint(
   el: HTMLElement,
   questionText: string,
   inputType: string,
   sectionType?: string,
-  sectionIndex?: number
+  sectionIndex?: number,
+  occurrenceIndex = 0
 ): string {
-  const autoId =
-    el.getAttribute("data-automation-id") ||
-    el
-      .closest("[data-automation-id]")
-      ?.getAttribute("data-automation-id") ||
-    "";
+  const autoId = resolveAutomationId(el);
   const id = el.id || "";
   const name = el.getAttribute("name") || "";
   const normQ = normalizeQuestion(questionText);
+  const suffix = occurrenceIndex > 0 ? `#${occurrenceIndex}` : "";
   return [
     sectionType || "general",
     String(sectionIndex ?? 0),
@@ -304,11 +411,11 @@ function computeFieldFingerprint(
     autoId,
     id,
     name,
-    normQ,
+    `${normQ}${suffix}`,
   ].join("::");
 }
 
-function extractRadioChoiceLabel(radio: HTMLInputElement): string {
+function extractRadioChoiceLabel(radio: HTMLElement): string {
   const doc = radio.ownerDocument || document;
   if (radio.id) {
     try {
@@ -324,7 +431,41 @@ function extractRadioChoiceLabel(radio: HTMLInputElement): string {
   }
   const aria = radio.getAttribute("aria-label")?.trim();
   if (aria) return aria;
-  return radio.value;
+  if (radio instanceof HTMLInputElement && radio.value) {
+    return radio.value;
+  }
+  return radio.textContent?.trim() || "";
+}
+
+function detectDateFormatHint(
+  el: HTMLElement,
+  questionText: string
+): string | undefined {
+  const rawType = (el.getAttribute("type") || "").toLowerCase();
+  if (rawType === "month") return "YYYY-MM";
+
+  const autoId = el.getAttribute("data-automation-id") || "";
+  if (/dateSectionMonth/i.test(autoId)) return "MM";
+  if (/dateSectionYear/i.test(autoId)) return "YYYY";
+  if (/dateSectionDay/i.test(autoId)) return "DD";
+
+  const containerText =
+    el.closest('[data-automation-id^="formField"], .form-group')?.textContent ||
+    "";
+  const placeholder = el.getAttribute("placeholder") || "";
+  const ariaLabel = el.getAttribute("aria-label") || "";
+  const combined = `${questionText} ${placeholder} ${ariaLabel} ${containerText}`;
+
+  if (/\bMM\/YYYY\b/i.test(combined)) return "MM/YYYY";
+  if (/\bMM\/DD\/YYYY\b/i.test(combined)) return "MM/DD/YYYY";
+  if (/\bDD\/MM\/YYYY\b/i.test(combined)) return "DD/MM/YYYY";
+  if (
+    /\bcurrent value is YYYY\b/i.test(combined) ||
+    /^YYYY$/i.test(placeholder.trim())
+  ) {
+    return "YYYY";
+  }
+  return "YYYY-MM-DD";
 }
 
 /**
@@ -338,12 +479,42 @@ export function detectFieldsInRoot(
   const processedRadioGroups = new Set<string>();
   const processedCheckboxGroups = new Set<HTMLElement>();
   const processedElements = new Set<HTMLElement>();
+  const fingerprintCounts = new Map<string, number>();
+
+  const makeUniqueFingerprint = (
+    el: HTMLElement,
+    questionText: string,
+    inputType: string,
+    sectionType?: string,
+    sectionIndex?: number
+  ): string => {
+    const base = computeFieldFingerprint(
+      el,
+      questionText,
+      inputType,
+      sectionType,
+      sectionIndex,
+      0
+    );
+    const count = fingerprintCounts.get(base) || 0;
+    fingerprintCounts.set(base, count + 1);
+    return count === 0
+      ? base
+      : computeFieldFingerprint(
+          el,
+          questionText,
+          inputType,
+          sectionType,
+          sectionIndex,
+          count
+        );
+  };
 
   // Ignore elements inside our own extension floating panel
   const isInsideExtensionUi = (el: HTMLElement) =>
     Boolean(el.closest("#wsa-floating-status-panel, [data-wsa-ignore='true']"));
 
-  // 1. Scan multi-option checkbox groups first (fieldset or container with [data-wsa-checkbox-group] or multiple checkboxes sharing a question)
+  // 1. Scan multi-option checkbox groups first
   const fieldsets = Array.from(
     root.querySelectorAll(
       'fieldset, [role="group"], [data-automation-id*="checkboxGroup"], [data-wsa-checkbox-group]'
@@ -357,7 +528,8 @@ export function detectFieldsInRoot(
     ) as HTMLInputElement[];
     if (checkboxes.length > 1) {
       const legend =
-        group.querySelector("legend, [data-automation-id='formLabel'], .form-label")
+        group
+          .querySelector("legend, [data-automation-id='formLabel'], .form-label")
           ?.textContent?.trim() || extractFieldQuestionText(group, root);
       if (!legend) continue;
 
@@ -372,7 +544,7 @@ export function detectFieldsInRoot(
       const qClean = cleanLabelText(legend);
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           group,
           qClean,
           "checkbox",
@@ -380,13 +552,13 @@ export function detectFieldsInRoot(
           sectionIndex
         ),
         elementId: group.id || undefined,
-        automationId: group.getAttribute("data-automation-id") || undefined,
+        automationId: resolveAutomationId(group) || undefined,
         questionText: qClean,
         normalizedQuestion: normalizeQuestion(qClean),
         inputType: "checkbox",
         availableChoices: choices,
         currentValue: checkedChoices,
-        required: isRequiredField(group, qClean),
+        required: isRequiredField(group, legend),
         disabled: checkboxes.every((cb) => cb.disabled),
         readOnly: false,
         isLegalDeclaration: isLegalDeclarationText(qClean),
@@ -402,7 +574,7 @@ export function detectFieldsInRoot(
     }
   }
 
-  // 2. Scan custom multi-select containers ([data-automation-id*="multiSelect"] or [data-wsa-multiselect])
+  // 2. Scan custom multi-select containers
   const customMultiContainers = Array.from(
     root.querySelectorAll(
       '[data-automation-id*="multiSelect"], [data-wsa-multiselect="true"]'
@@ -412,18 +584,29 @@ export function detectFieldsInRoot(
   for (const container of customMultiContainers) {
     if (isInsideExtensionUi(container) || !isElementVisible(container)) continue;
     if (processedElements.has(container)) continue;
-    processedElements.add(container);
-
-    // Mark inner inputs as processed so they aren't double-counted
-    container
-      .querySelectorAll("input, select, button")
-      .forEach((child) => processedElements.add(child as HTMLElement));
 
     const questionText = extractFieldQuestionText(container, root);
     if (!questionText) continue;
 
+    // Check if this Workday multiSelectContainer is actually a single-value prompt (like Country Phone Code or How Did You Hear About Us)
+    const normQ = normalizeQuestion(questionText);
+    const isSinglePrompt =
+      /\b(country phone code|how did you hear about us|country|degree)\b/.test(
+        normQ
+      );
+    if (isSinglePrompt) {
+      // Let it be handled as a dropdown/prompt below or handle here as dropdown
+    }
+
+    processedElements.add(container);
+    container
+      .querySelectorAll("input, select, button")
+      .forEach((child) => processedElements.add(child as HTMLElement));
+
     const optionNodes = Array.from(
-      container.querySelectorAll("[data-option-value], [role='option'], option, label")
+      container.querySelectorAll(
+        "[data-option-value], [role='option'], option, label"
+      )
     ) as HTMLElement[];
     const availableChoices = Array.from(
       new Set(
@@ -438,33 +621,44 @@ export function detectFieldsInRoot(
       )
     );
 
+    const selectedPills = Array.from(
+      container.querySelectorAll(
+        '[data-automation-id="selectedItem"], [data-automation-id*="selectedItem"]'
+      )
+    )
+      .map((el) => el.textContent?.trim() || "")
+      .filter(Boolean);
+
     const selectedAttr = container.getAttribute("data-selected-values");
     const currentValue = selectedAttr
       ? selectedAttr
           .split("|")
           .map((s) => s.trim())
           .filter(Boolean)
+      : selectedPills.length > 0
+      ? selectedPills
       : Array.from(
           container.querySelectorAll('input[type="checkbox"]:checked')
         ).map((cb) => extractRadioChoiceLabel(cb as HTMLInputElement));
 
     const { sectionType, sectionIndex } = detectSectionContext(container);
+    const resolvedType: AnswerType = isSinglePrompt ? "dropdown" : "multiselect";
 
     results.push({
-      fieldFingerprint: computeFieldFingerprint(
+      fieldFingerprint: makeUniqueFingerprint(
         container,
         questionText,
-        "multiselect",
+        resolvedType,
         sectionType,
         sectionIndex
       ),
       elementId: container.id || undefined,
-      automationId: container.getAttribute("data-automation-id") || undefined,
+      automationId: resolveAutomationId(container) || undefined,
       questionText,
-      normalizedQuestion: normalizeQuestion(questionText),
-      inputType: "multiselect",
+      normalizedQuestion: normQ,
+      inputType: resolvedType,
       availableChoices,
-      currentValue,
+      currentValue: isSinglePrompt ? (currentValue[0] || "") : currentValue,
       required: isRequiredField(container, questionText),
       disabled:
         container.getAttribute("aria-disabled") === "true" ||
@@ -481,10 +675,10 @@ export function detectFieldsInRoot(
     });
   }
 
-  // 3. Scan standard inputs, textareas, selects, and custom comboboxes
+  // 3. Scan standard inputs, textareas, selects, ARIA radios, and custom comboboxes
   const candidates = Array.from(
     root.querySelectorAll(
-      'input, textarea, select, [role="combobox"], button[aria-haspopup="listbox"], [data-automation-id*="selectWidget"]'
+      'input, textarea, select, [role="combobox"], [role="radio"], button[aria-haspopup="listbox"], [data-automation-id*="selectWidget"]'
     )
   ) as HTMLElement[];
 
@@ -495,19 +689,27 @@ export function detectFieldsInRoot(
 
     // Skip buttons/inputs that are inside an already-processed custom combobox/multiselect
     const parentCombo = el.parentElement?.closest(
-      '[role="combobox"], [data-automation-id*="selectWidget"]'
+      '[role="combobox"], [data-automation-id*="selectWidget"], [data-automation-id*="multiSelect"]'
     ) as HTMLElement | null;
-    if (parentCombo && parentCombo !== el && processedElements.has(parentCombo)) {
+    if (
+      parentCombo &&
+      parentCombo !== el &&
+      processedElements.has(parentCombo)
+    ) {
       continue;
     }
 
-    // Handle Radio Buttons (group by name or radiogroup container)
-    if (el instanceof HTMLInputElement && el.type === "radio") {
+    // Handle Radio Buttons (native input[type="radio"] OR ARIA [role="radio"])
+    const isNativeRadio = el instanceof HTMLInputElement && el.type === "radio";
+    const isAriaRadio = el.getAttribute("role") === "radio";
+
+    if (isNativeRadio || isAriaRadio) {
       const radioGroupContainer = el.closest(
         '[role="radiogroup"], fieldset, [data-automation-id^="formField"]'
       ) as HTMLElement | null;
+      const nameAttr = el.getAttribute("name") || "";
       const groupKey =
-        el.name ||
+        nameAttr ||
         radioGroupContainer?.id ||
         radioGroupContainer?.getAttribute("data-automation-id") ||
         `radio-${results.length}`;
@@ -515,15 +717,20 @@ export function detectFieldsInRoot(
       if (processedRadioGroups.has(groupKey)) continue;
       processedRadioGroups.add(groupKey);
 
-      const radiosInGroup: HTMLInputElement[] = el.name
-        ? (Array.from(
-            root.querySelectorAll(`input[type="radio"][name="${cssEscape(el.name)}"]`)
-          ) as HTMLInputElement[])
-        : radioGroupContainer
-        ? (Array.from(
-            radioGroupContainer.querySelectorAll('input[type="radio"]')
-          ) as HTMLInputElement[])
-        : [el];
+      const radiosInGroup: HTMLElement[] =
+        isNativeRadio && nameAttr
+          ? (Array.from(
+              root.querySelectorAll(
+                `input[type="radio"][name="${cssEscape(nameAttr)}"]`
+              )
+            ) as HTMLElement[])
+          : radioGroupContainer
+          ? (Array.from(
+              radioGroupContainer.querySelectorAll(
+                'input[type="radio"], [role="radio"]'
+              )
+            ) as HTMLElement[])
+          : [el];
 
       radiosInGroup.forEach((r) => processedElements.add(r));
 
@@ -535,14 +742,18 @@ export function detectFieldsInRoot(
       const availableChoices = radiosInGroup.map((r) =>
         extractRadioChoiceLabel(r)
       );
-      const checkedRadio = radiosInGroup.find((r) => r.checked);
+      const checkedRadio = radiosInGroup.find((r) =>
+        r instanceof HTMLInputElement
+          ? r.checked
+          : r.getAttribute("aria-checked") === "true"
+      );
       const currentValue = checkedRadio
         ? extractRadioChoiceLabel(checkedRadio)
         : "";
       const { sectionType, sectionIndex } = detectSectionContext(el);
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           radioGroupContainer || el,
           questionText,
           "radio",
@@ -550,17 +761,19 @@ export function detectFieldsInRoot(
           sectionIndex
         ),
         elementId: (radioGroupContainer || el).id || undefined,
-        name: el.name || undefined,
-        automationId:
-          (radioGroupContainer || el).getAttribute("data-automation-id") ||
-          undefined,
+        name: nameAttr || undefined,
+        automationId: resolveAutomationId(radioGroupContainer || el) || undefined,
         questionText,
         normalizedQuestion: normalizeQuestion(questionText),
         inputType: "radio",
         availableChoices,
         currentValue,
         required: isRequiredField(radioGroupContainer || el, questionText),
-        disabled: radiosInGroup.every((r) => r.disabled),
+        disabled: radiosInGroup.every(
+          (r) =>
+            (r as HTMLInputElement).disabled ||
+            r.getAttribute("aria-disabled") === "true"
+        ),
         readOnly: false,
         isLegalDeclaration: isLegalDeclarationText(questionText),
         isSensitive: isSensitiveQuestionText(questionText),
@@ -577,7 +790,9 @@ export function detectFieldsInRoot(
 
     // Handle Single Checkbox
     if (el instanceof HTMLInputElement && el.type === "checkbox") {
-      const parentGroup = el.closest("fieldset, [role='group']") as HTMLElement | null;
+      const parentGroup = el.closest(
+        "fieldset, [role='group']"
+      ) as HTMLElement | null;
       if (parentGroup && processedCheckboxGroups.has(parentGroup)) continue;
 
       processedElements.add(el);
@@ -586,7 +801,7 @@ export function detectFieldsInRoot(
 
       const { sectionType, sectionIndex } = detectSectionContext(el);
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           el,
           questionText,
           "checkbox",
@@ -595,7 +810,7 @@ export function detectFieldsInRoot(
         ),
         elementId: el.id || undefined,
         name: el.name || undefined,
-        automationId: el.getAttribute("data-automation-id") || undefined,
+        automationId: resolveAutomationId(el) || undefined,
         questionText,
         normalizedQuestion: normalizeQuestion(questionText),
         inputType: "checkbox",
@@ -639,7 +854,7 @@ export function detectFieldsInRoot(
       const inputType: AnswerType = isMulti ? "multiselect" : "dropdown";
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           el,
           questionText,
           inputType,
@@ -648,7 +863,7 @@ export function detectFieldsInRoot(
         ),
         elementId: el.id || undefined,
         name: el.name || undefined,
-        automationId: el.getAttribute("data-automation-id") || undefined,
+        automationId: resolveAutomationId(el) || undefined,
         questionText,
         normalizedQuestion: normalizeQuestion(questionText),
         inputType,
@@ -669,7 +884,7 @@ export function detectFieldsInRoot(
       continue;
     }
 
-    // Handle Custom Dropdown / ARIA Combobox
+    // Handle Custom Dropdown / ARIA Combobox / Workday selectWidget
     const isCustomDropdown =
       el.getAttribute("role") === "combobox" ||
       el.getAttribute("aria-haspopup") === "listbox" ||
@@ -685,7 +900,7 @@ export function detectFieldsInRoot(
       const { sectionType, sectionIndex } = detectSectionContext(el);
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           el,
           questionText,
           "dropdown",
@@ -694,7 +909,7 @@ export function detectFieldsInRoot(
         ),
         elementId: el.id || undefined,
         name: el.getAttribute("name") || undefined,
-        automationId: el.getAttribute("data-automation-id") || undefined,
+        automationId: resolveAutomationId(el) || undefined,
         questionText,
         normalizedQuestion: normalizeQuestion(questionText),
         inputType: "dropdown",
@@ -725,7 +940,7 @@ export function detectFieldsInRoot(
       const { sectionType, sectionIndex } = detectSectionContext(el);
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           el,
           questionText,
           "textarea",
@@ -734,7 +949,7 @@ export function detectFieldsInRoot(
         ),
         elementId: el.id || undefined,
         name: el.name || undefined,
-        automationId: el.getAttribute("data-automation-id") || undefined,
+        automationId: resolveAutomationId(el) || undefined,
         questionText,
         normalizedQuestion: normalizeQuestion(questionText),
         inputType: "textarea",
@@ -771,10 +986,11 @@ export function detectFieldsInRoot(
       processedElements.add(el);
 
       if (rawType === "file") {
-        const questionText = extractFieldQuestionText(el, root) || "Resume / File Upload";
+        const questionText =
+          extractFieldQuestionText(el, root) || "Resume / File Upload";
         const { sectionType, sectionIndex } = detectSectionContext(el);
         results.push({
-          fieldFingerprint: computeFieldFingerprint(
+          fieldFingerprint: makeUniqueFingerprint(
             el,
             questionText,
             "file",
@@ -783,7 +999,7 @@ export function detectFieldsInRoot(
           ),
           elementId: el.id || undefined,
           name: el.name || undefined,
-          automationId: el.getAttribute("data-automation-id") || undefined,
+          automationId: resolveAutomationId(el) || undefined,
           questionText,
           normalizedQuestion: normalizeQuestion(questionText),
           inputType: "file",
@@ -807,38 +1023,47 @@ export function detectFieldsInRoot(
       if (!questionText) continue;
 
       let mappedType: AnswerType = "text";
-      const autoId = el.getAttribute("data-automation-id") || "";
+      const autoId = resolveAutomationId(el);
       const placeholder = el.getAttribute("placeholder") || "";
+      const normQ = normalizeQuestion(questionText);
 
       if (rawType === "email" || /\bemail\b/i.test(questionText)) {
         mappedType = "email";
-      } else if (rawType === "tel" || /\b(phone|mobile|telephone)\b/i.test(questionText)) {
+      } else if (
+        rawType === "tel" ||
+        /\b(phone|mobile|telephone)\b/i.test(questionText)
+      ) {
         mappedType = "phone";
-      } else if (rawType === "number" || /\b(gpa|years\s+of\s+experience)\b/i.test(questionText)) {
+      } else if (
+        rawType === "number" ||
+        /\b(gpa|overall result|years\s+of\s+experience)\b/i.test(questionText)
+      ) {
         mappedType = "number";
-      } else if (rawType === "url" || /\b(linkedin|github|portfolio|website|url)\b/i.test(questionText)) {
+      } else if (
+        rawType === "url" ||
+        /\b(linkedin|github|portfolio|website|url)\b/i.test(questionText)
+      ) {
         mappedType = "url";
       } else if (
         rawType === "date" ||
         rawType === "month" ||
         /date/i.test(autoId) ||
         /\b(date|graduation)\b/i.test(questionText) ||
-        /mm\/dd\/yyyy|yyyy-mm-dd/i.test(placeholder)
+        /^(from|to|to actual or expected)$/.test(normQ) ||
+        /mm\/dd\/yyyy|yyyy-mm-dd|mm\/yyyy/i.test(placeholder)
       ) {
         mappedType = "date";
       }
 
       const dateFormatHint =
-        rawType === "month"
-          ? "YYYY-MM"
-          : /mm\/dd\/yyyy/i.test(placeholder) || /mm\/dd\/yyyy/i.test(questionText)
-          ? "MM/DD/YYYY"
-          : "YYYY-MM-DD";
+        mappedType === "date"
+          ? detectDateFormatHint(el, questionText)
+          : undefined;
 
       const { sectionType, sectionIndex } = detectSectionContext(el);
 
       results.push({
-        fieldFingerprint: computeFieldFingerprint(
+        fieldFingerprint: makeUniqueFingerprint(
           el,
           questionText,
           mappedType,
@@ -849,7 +1074,7 @@ export function detectFieldsInRoot(
         name: el.name || undefined,
         automationId: autoId || undefined,
         questionText,
-        normalizedQuestion: normalizeQuestion(questionText),
+        normalizedQuestion: normQ,
         inputType: mappedType,
         availableChoices: [],
         currentValue: el.value,
@@ -860,7 +1085,7 @@ export function detectFieldsInRoot(
         isSensitive: isSensitiveQuestionText(questionText),
         sectionType,
         sectionIndex,
-        dateFormatHint: mappedType === "date" ? dateFormatHint : undefined,
+        dateFormatHint,
         validationMessage: extractValidationError(el),
         confidence: 0,
         status: "unanswered",
@@ -891,7 +1116,9 @@ function extractCustomDropdownChoices(
     const listbox = doc.getElementById(controlsId);
     if (listbox) {
       const opts = Array.from(
-        listbox.querySelectorAll('[role="option"], li, [data-option-value]')
+        listbox.querySelectorAll(
+          '[role="option"], li, [data-option-value], [data-automation-id="promptOption"]'
+        )
       )
         .map(
           (node) =>
@@ -909,7 +1136,9 @@ function extractCustomDropdownChoices(
   );
   if (container) {
     const opts = Array.from(
-      container.querySelectorAll('[role="option"], [data-option-value]')
+      container.querySelectorAll(
+        '[role="option"], [data-option-value], [data-automation-id="promptOption"]'
+      )
     )
       .map(
         (node) =>
@@ -921,10 +1150,13 @@ function extractCustomDropdownChoices(
     if (opts.length > 0) return opts;
   }
 
-  // Also check any open listbox in root
   const openListbox = root.querySelector('[role="listbox"]');
   if (openListbox) {
-    return Array.from(openListbox.querySelectorAll('[role="option"]'))
+    return Array.from(
+      openListbox.querySelectorAll(
+        '[role="option"], [data-automation-id="promptOption"]'
+      )
+    )
       .map((n) => n.textContent?.trim() || "")
       .filter(Boolean);
   }
@@ -941,7 +1173,7 @@ function extractCustomDropdownCurrentValue(el: HTMLElement): string {
     return selectedAttr.trim();
   }
   const text = el.textContent?.trim() || "";
-  if (/^(select|choose|select one|--)/i.test(text)) {
+  if (/^(select|choose|select one|--|0 items selected)/i.test(text)) {
     return "";
   }
   return text;

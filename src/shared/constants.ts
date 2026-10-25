@@ -6,12 +6,14 @@ import {
 } from "./types";
 
 export const STORAGE_KEYS = {
-  PROFILE: "wsa_user_profile_v1",
-  QUESTION_BANK: "wsa_question_bank_v1",
-  ACTIVE_SESSION: "wsa_active_session_v1",
-  SESSION_HISTORY: "wsa_session_history_v1",
-  SETTINGS: "wsa_extension_settings_v1",
-  INITIALIZED: "wsa_initialized_v1",
+  PROFILE: "wsa_user_profile_v2",
+  ACTIVE_PROFILE_ID: "wsa_active_profile_id_v2",
+  CUSTOM_PROFILES_MAP: "wsa_profiles_map_v2",
+  QUESTION_BANK: "wsa_question_bank_v2",
+  ACTIVE_SESSION: "wsa_active_session_v2",
+  SESSION_HISTORY: "wsa_session_history_v2",
+  SETTINGS: "wsa_extension_settings_v2",
+  INITIALIZED: "wsa_initialized_v2",
 } as const;
 
 export const QUESTION_CATEGORIES: QuestionCategory[] = [
@@ -161,11 +163,8 @@ export const EMPTY_PROFILE: UserProfile = {
 
 export const LEGAL_DECLARATION_PATTERNS: RegExp[] = [
   /\bi\s+(hereby\s+)?certify\b/i,
-  /\bi\s+acknowledge\b/i,
   /\bi\s+declare\b/i,
   /\bi\s+attest\b/i,
-  /\bterms\s+and\s+conditions\b/i,
-  /\bprivacy\s+(policy|statement|notice)\b/i,
   /\bconsent\s+to\s+background\s+check\b/i,
   /\btrue\s+and\s+complete\s+to\s+the\s+best\s+of\s+my\s+knowledge\b/i,
   /\belectronic\s+signature\b/i,

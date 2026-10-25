@@ -66,12 +66,10 @@ export function hasSemanticConflict(normA: string, normB: string): boolean {
   }
 
   // Previously worked here vs Willing to relocate
-  const aPrevWorked = /\b(previously worked|former employee|ever been employed)\b/.test(
-    normA
-  );
-  const bPrevWorked = /\b(previously worked|former employee|ever been employed)\b/.test(
-    normB
-  );
+  const prevWorkRegex =
+    /\b(previously worked|former employee|ever been employed|ever been a .* employee|contractor or intern|worked for this company)\b/;
+  const aPrevWorked = prevWorkRegex.test(normA);
+  const bPrevWorked = prevWorkRegex.test(normB);
   if (aPrevWorked !== bPrevWorked && (aPrevWorked || bPrevWorked)) {
     // Only allow if both refer to previous employment
     return true;

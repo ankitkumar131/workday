@@ -7,25 +7,41 @@ import {
   Play,
   Sparkles,
   Square,
+  UserCheck,
 } from "lucide-react";
 import { ExtensionMessage, ExtensionMessageResponse } from "../shared/messages";
+import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
 import { AutofillSession } from "../shared/types";
-import { calculateProfileCompletion, getProfile } from "../storage/profile-store";
+import {
+  calculateProfileCompletion,
+  getActiveProfileId,
+  getProfile,
+  switchPresetProfile,
+} from "../storage/profile-store";
 import { getQuestions } from "../storage/question-store";
 import { getActiveSession } from "../storage/session-store";
 
 export const PopupApp: React.FC = () => {
   const [session, setSession] = useState<AutofillSession | null>(null);
+  const [activeProfileId, setActiveProfileId] = useState<PresetProfileId>("ankit");
+  const [activeName, setActiveName] = useState<string>("Ankit Kumar");
+  const [activeEmail, setActiveEmail] = useState<string>(
+    "ankit.kumar.career9@gmail.com"
+  );
   const [profileCompletion, setProfileCompletion] = useState(100);
   const [questionCount, setQuestionCount] = useState(0);
   const [statusNote, setStatusNote] = useState<string | null>(null);
 
   const loadState = async () => {
-    const [prof, qs, activeSess] = await Promise.all([
+    const [profId, prof, qs, activeSess] = await Promise.all([
+      getActiveProfileId(),
       getProfile(),
       getQuestions(),
       getActiveSession(),
     ]);
+    setActiveProfileId(profId);
+    setActiveName(prof.personal.fullName || PRESET_PROFILES[profId].label);
+    setActiveEmail(prof.personal.email || PRESET_PROFILES[profId].email);
     setProfileCompletion(calculateProfileCompletion(prof).percentage);
     setQuestionCount(qs.filter((q) => q.enabled).length);
     setSession(activeSess);
@@ -34,6 +50,20 @@ export const PopupApp: React.FC = () => {
   useEffect(() => {
     void loadState();
   }, []);
+
+  const handleSwitchProfile = async (presetId: PresetProfileId) => {
+    const nextProf = await switchPresetProfile(presetId);
+    const fullName =
+      nextProf.personal.fullName ||
+      `${nextProf.personal.firstName} ${nextProf.personal.lastName}`.trim();
+    setActiveProfileId(presetId);
+    setActiveName(fullName);
+    setActiveEmail(nextProf.personal.email);
+    setProfileCompletion(calculateProfileCompletion(nextProf).percentage);
+    setStatusNote(
+      `Switched active profile to ${PRESET_PROFILES[presetId].label} (${fullName}).`
+    );
+  };
 
   const sendCommand = (message: ExtensionMessage) => {
     if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
@@ -86,7 +116,7 @@ export const PopupApp: React.FC = () => {
           justifyContent: "space-between",
           paddingBottom: 12,
           borderBottom: "1px solid #e2e8f0",
-          marginBottom: 14,
+          marginBottom: 12,
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -115,6 +145,85 @@ export const PopupApp: React.FC = () => {
         </span>
       </div>
 
+      {/* 1-Click Candidate Profile Switcher (Ankit vs Aman) */}
+      <div
+        style={{
+          background: "#f8fafc",
+          border: "1px solid #e2e8f0",
+          borderRadius: 10,
+          padding: 10,
+          marginBottom: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 8,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#475569",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <UserCheck size={13} style={{ color: "#2563eb" }} /> Active Resume
+            Profile
+          </span>
+          <span style={{ fontSize: 11, color: "#64748b" }}>
+            {activeName} ({activeEmail})
+          </span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+          {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
+            const isSelected = activeProfileId === pid;
+            const meta = PRESET_PROFILES[pid];
+            return (
+              <button
+                key={pid}
+                type="button"
+                onClick={() => void handleSwitchProfile(pid)}
+                style={{
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  border: isSelected
+                    ? "2px solid #2563eb"
+                    : "1px solid #cbd5e1",
+                  background: isSelected ? "#eff6ff" : "#ffffff",
+                  color: isSelected ? "#1d4ed8" : "#334155",
+                  fontWeight: 600,
+                  fontSize: 12,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <div>{meta.label}</div>
+                <div
+                  style={{
+                    fontSize: 10.5,
+                    fontWeight: 400,
+                    color: isSelected ? "#2563eb" : "#64748b",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {meta.subtitle}
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {statusNote && (
         <div className="alert alert-info" style={{ padding: "8px 10px", fontSize: 12 }}>
           <span>{statusNote}</span>
@@ -133,7 +242,12 @@ export const PopupApp: React.FC = () => {
         <button
           type="button"
           className="btn btn-secondary"
-          onClick={() => sendCommand({ type: "FILL_CURRENT_STEP" })}
+          onClick={() =>
+            sendCommand({
+              type: "FILL_CURRENT_STEP",
+              payload: { overwriteExisting: true },
+            })
+          }
         >
           <Sparkles size={14} /> Fill Current Step
         </button>

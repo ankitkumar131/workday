@@ -52,6 +52,7 @@ export interface PersonalInformation {
   firstName: string;
   middleName: string;
   lastName: string;
+  fullName?: string;
   preferredName: string;
   email: string;
   phoneCountryCode: string;

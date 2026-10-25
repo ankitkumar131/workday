@@ -16,38 +16,81 @@ export interface FillFieldOutcome {
   verified: boolean;
 }
 
+interface ValueTrackerElement extends HTMLElement {
+  _valueTracker?: {
+    setValue(val: string): void;
+  };
+}
+
 /**
  * Sets value on an input/textarea/select using the native prototype setter
- * so React, Vue, and Workday controlled inputs register state updates.
+ * and updates React's internal _valueTracker so controlled inputs in Workday
+ * register state changes reliably.
  */
 export function setNativeControlValue(
   element: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
   value: string
 ): void {
-  const proto =
+  const previousValue = element.value;
+
+  const instanceProto = Object.getPrototypeOf(element);
+  const windowProto =
     element instanceof HTMLInputElement
       ? window.HTMLInputElement.prototype
       : element instanceof HTMLTextAreaElement
       ? window.HTMLTextAreaElement.prototype
       : window.HTMLSelectElement.prototype;
 
-  const descriptor = Object.getOwnPropertyDescriptor(proto, "value");
+  const descriptor =
+    Object.getOwnPropertyDescriptor(instanceProto, "value") ||
+    Object.getOwnPropertyDescriptor(windowProto, "value");
+
   if (descriptor && descriptor.set) {
     descriptor.set.call(element, value);
   } else {
     element.value = value;
   }
+
+  const tracker = (element as unknown as ValueTrackerElement)._valueTracker;
+  if (tracker && typeof tracker.setValue === "function") {
+    try {
+      tracker.setValue(previousValue);
+    } catch {
+      // ignore tracker error
+    }
+  }
 }
 
-export function dispatchInputEvents(element: HTMLElement): void {
+export function dispatchInputEvents(
+  element: HTMLElement,
+  valueText?: string
+): void {
   element.dispatchEvent(new Event("focus", { bubbles: false }));
-  element.dispatchEvent(new Event("input", { bubbles: true, cancelable: true }));
-  element.dispatchEvent(new Event("change", { bubbles: true, cancelable: true }));
+  element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+  if (typeof InputEvent !== "undefined") {
+    element.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        cancelable: true,
+        data: valueText ?? "",
+        inputType: "insertText",
+      })
+    );
+  } else {
+    element.dispatchEvent(
+      new Event("input", { bubbles: true, cancelable: true })
+    );
+  }
+  element.dispatchEvent(
+    new Event("change", { bubbles: true, cancelable: true })
+  );
+  element.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
   element.dispatchEvent(new Event("blur", { bubbles: false }));
 }
 
 /**
- * Formats a date string into the format expected by the target form control.
+ * Formats a date string into the format expected by the target form control
+ * (YYYY-MM-DD, YYYY-MM, MM/YYYY, YYYY, MM, or MM/DD/YYYY).
  * Never guesses missing dates.
  */
 export function formatDateForField(
@@ -58,14 +101,15 @@ export function formatDateForField(
   const trimmed = rawDate.trim();
   if (!trimmed) return null;
 
-  // Parse YYYY-MM-DD, YYYY-MM, or MM/DD/YYYY
   let year = "";
-  let month = "";
+  let month = "01";
   let day = "01";
   let hasDay = false;
 
   const isoFull = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   const isoMonth = trimmed.match(/^(\d{4})-(\d{2})$/);
+  const yearOnly = trimmed.match(/^(\d{4})$/);
+  const slashMonthYear = trimmed.match(/^(\d{1,2})\/(\d{4})$/);
   const usSlash = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
 
   if (isoFull) {
@@ -77,6 +121,12 @@ export function formatDateForField(
     year = isoMonth[1];
     month = isoMonth[2];
     hasDay = false;
+  } else if (yearOnly) {
+    year = yearOnly[1];
+    month = "06";
+  } else if (slashMonthYear) {
+    month = slashMonthYear[1].padStart(2, "0");
+    year = slashMonthYear[2];
   } else if (usSlash) {
     month = usSlash[1].padStart(2, "0");
     day = usSlash[2].padStart(2, "0");
@@ -91,14 +141,21 @@ export function formatDateForField(
       ? (element.getAttribute("type") || "").toLowerCase()
       : "";
 
+  if (formatHint === "YYYY") {
+    return year;
+  }
+  if (formatHint === "MM") {
+    return month;
+  }
+  if (formatHint === "MM/YYYY") {
+    return `${month}/${year}`;
+  }
   if (inputType === "month" || formatHint === "YYYY-MM") {
     return `${year}-${month}`;
   }
-
   if (formatHint === "MM/DD/YYYY" && inputType !== "date") {
     return `${month}/${hasDay ? day : "01"}/${year}`;
   }
-
   return `${year}-${month}-${hasDay ? day : "01"}`;
 }
 
@@ -111,7 +168,11 @@ function hasExistingNonEmptyValue(field: DetectedFieldRuntime): boolean {
     return Boolean((el as HTMLInputElement).checked);
   }
   if (field.inputType === "radio" && field.groupElements) {
-    return field.groupElements.some((r) => (r as HTMLInputElement).checked);
+    return field.groupElements.some((r) =>
+      r instanceof HTMLInputElement
+        ? r.checked
+        : r.getAttribute("aria-checked") === "true"
+    );
   }
   if (el instanceof HTMLSelectElement) {
     if (el.multiple) {
@@ -123,7 +184,11 @@ function hasExistingNonEmptyValue(field: DetectedFieldRuntime): boolean {
     return el.value.trim().length > 0;
   }
   if (typeof field.currentValue === "string") {
-    return field.currentValue.trim().length > 0;
+    const trimmed = field.currentValue.trim();
+    if (/^(select one|select|choose|--|0 items selected)$/i.test(trimmed)) {
+      return false;
+    }
+    return trimmed.length > 0;
   }
   if (Array.isArray(field.currentValue)) {
     return field.currentValue.length > 0;
@@ -131,18 +196,53 @@ function hasExistingNonEmptyValue(field: DetectedFieldRuntime): boolean {
   return false;
 }
 
-function matchChoiceText(candidate: string, target: string): boolean {
+export function matchChoiceText(candidate: string, target: string): boolean {
   const normCandidate = normalizeQuestion(candidate);
   const normTarget = normalizeQuestion(target);
   if (!normCandidate || !normTarget) return false;
   if (normCandidate === normTarget) return true;
 
-  // Common synonyms for Yes/No or degree levels
+  // Degree synonyms (e.g. BCA / Bachelor of Computer Applications / Bachelor's Degree / BS / MS)
   if (
-    (normTarget === "master of science" && normCandidate.includes("master")) ||
-    (normTarget === "bachelor of science" && normCandidate.includes("bachelor"))
+    /\b(bachelor|bca|b c a|b sc|b tech|b e)\b/.test(normTarget) &&
+    /\b(bachelor|bca|b c a|b sc|b tech|b e|undergraduate)\b/.test(normCandidate)
   ) {
     return true;
+  }
+  if (
+    /\b(master|mca|m sc|m tech|mba)\b/.test(normTarget) &&
+    /\b(master|mca|m sc|m tech|mba|postgraduate|graduate)\b/.test(normCandidate)
+  ) {
+    return true;
+  }
+
+  // Country phone code synonyms (e.g. "India (+91)" <-> "+91")
+  if (
+    (normTarget.includes("91") && normCandidate.includes("91")) ||
+    (normTarget.includes("india") && normCandidate.includes("india"))
+  ) {
+    return true;
+  }
+
+  // Disability disclosure synonyms
+  if (
+    normTarget === "no" &&
+    /\b(do not have a disability|no disability|none)\b/.test(normCandidate)
+  ) {
+    return true;
+  }
+
+  // Phone device type synonyms
+  if (
+    normTarget === "mobile" &&
+    /\b(mobile|cellular|cell)\b/.test(normCandidate)
+  ) {
+    return true;
+  }
+
+  // Avoid matching "yes" inside words or "no" inside "non-binary" / "none" when Yes/No is expected
+  if (normTarget === "yes" || normTarget === "no") {
+    return normCandidate === normTarget;
   }
 
   return (
@@ -182,6 +282,16 @@ export function highlightFieldElement(
 
   element.style.outline = borderMap[status] || "";
   element.style.outlineOffset = "2px";
+}
+
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function triggerRealisticClick(el: HTMLElement): void {
+  el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+  el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
+  el.click();
 }
 
 /**
@@ -276,33 +386,54 @@ async function performSingleFillAttempt(
 }> {
   const el = field.element;
 
-  // 1. Radio Group
+  // 1. Radio Group (supports native input[type="radio"] and ARIA [role="radio"])
   if (field.inputType === "radio") {
     const targetStr = String(desiredValue).trim();
     const radios = (field.groupElements ||
-      Array.from(el.querySelectorAll('input[type="radio"]'))) as HTMLInputElement[];
+      Array.from(
+        el.querySelectorAll('input[type="radio"], [role="radio"]')
+      )) as HTMLElement[];
 
     for (const radio of radios) {
+      const explicitLabel =
+        radio.id && radio.ownerDocument
+          ? (radio.ownerDocument.querySelector(
+              `label[for="${cssEscape(radio.id)}"]`
+            ) as HTMLElement | null)
+          : null;
+      const wrappingLabel = radio.closest("label") as HTMLElement | null;
       const label =
-        (radio.id
-          ? radio.ownerDocument
-              ?.querySelector(`label[for="${cssEscape(radio.id)}"]`)
-              ?.textContent?.trim()
-          : undefined) ||
-        radio.closest("label")?.textContent?.trim() ||
+        explicitLabel?.textContent?.trim() ||
+        wrappingLabel?.textContent?.trim() ||
         radio.getAttribute("aria-label") ||
-        radio.value;
+        (radio instanceof HTMLInputElement ? radio.value : "") ||
+        radio.textContent?.trim() ||
+        "";
+
+      const radioValue =
+        radio instanceof HTMLInputElement ? radio.value : label;
 
       if (
         matchChoiceText(label, targetStr) ||
-        matchChoiceText(radio.value, targetStr)
+        matchChoiceText(radioValue, targetStr)
       ) {
         radio.focus();
-        radio.checked = true;
-        radio.click();
-        dispatchInputEvents(radio);
-
-        if (radio.checked) {
+        if (radio instanceof HTMLInputElement) {
+          radio.checked = true;
+          triggerRealisticClick(radio);
+          if (explicitLabel && !radio.checked) {
+            triggerRealisticClick(explicitLabel);
+          } else if (wrappingLabel && !radio.checked) {
+            triggerRealisticClick(wrappingLabel);
+          }
+          dispatchInputEvents(radio);
+          if (radio.checked) {
+            return { verified: true, appliedValue: label };
+          }
+        } else {
+          // ARIA role="radio"
+          triggerRealisticClick(radio);
+          radio.setAttribute("aria-checked", "true");
           return { verified: true, appliedValue: label };
         }
       }
@@ -338,6 +469,7 @@ async function performSingleFillAttempt(
         );
         if (cb.checked !== shouldCheck) {
           cb.checked = shouldCheck;
+          triggerRealisticClick(cb);
           dispatchInputEvents(cb);
         }
         if (cb.checked) {
@@ -361,7 +493,10 @@ async function performSingleFillAttempt(
           : /^(true|yes|1|checked)$/i.test(String(desiredValue).trim());
 
       el.focus();
-      el.checked = targetBool;
+      if (el.checked !== targetBool) {
+        triggerRealisticClick(el);
+        el.checked = targetBool;
+      }
       dispatchInputEvents(el);
 
       if (el.checked === targetBool) {
@@ -414,7 +549,7 @@ async function performSingleFillAttempt(
 
       setNativeControlValue(el, matchedOption.value);
       matchedOption.selected = true;
-      dispatchInputEvents(el);
+      dispatchInputEvents(el, matchedOption.value);
 
       if (el.value === matchedOption.value) {
         return { verified: true, appliedValue: matchedOption.text.trim() };
@@ -423,53 +558,94 @@ async function performSingleFillAttempt(
     }
   }
 
-  // 4. Custom Dropdown / ARIA Combobox / Workday selectWidget
+  // 4. Custom Dropdown / ARIA Combobox / Workday selectWidget / Prompt
   if (field.inputType === "dropdown") {
     const targetStr = String(desiredValue).trim();
     const doc = el.ownerDocument || document;
 
+    // Candidate targets to try (primary answer + common fallbacks for referral source)
+    const fallbackTargets = [targetStr];
+    if (/hear about us/i.test(field.questionText)) {
+      for (const fb of [
+        "Advertisement",
+        "LinkedIn",
+        "Job Board",
+        "Company Website",
+        "Internet",
+        "Other",
+      ]) {
+        if (!fallbackTargets.includes(fb)) fallbackTargets.push(fb);
+      }
+    }
+
     // Step A: Click/open the combobox trigger
     el.focus();
-    el.click();
+    triggerRealisticClick(el);
 
-    // Step B: Find associated listbox or options in DOM
-    const controlsId =
-      el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
-    const container =
-      (controlsId ? doc.getElementById(controlsId) : null) ||
-      el.closest(
-        '[data-automation-id^="formField"], .form-group, .wsa-combobox-wrapper'
-      ) ||
-      doc.querySelector('[role="listbox"]');
+    // Step B: Locate listbox options (with brief poll for async Workday portal listboxes)
+    const findOptionNodes = (): HTMLElement[] => {
+      const controlsId =
+        el.getAttribute("aria-controls") || el.getAttribute("aria-owns");
+      const container =
+        (controlsId ? doc.getElementById(controlsId) : null) ||
+        el.closest(
+          '[data-automation-id^="formField"], .form-group, .wsa-combobox-wrapper'
+        );
 
-    if (container) {
-      const optionNodes = Array.from(
-        container.querySelectorAll(
-          '[role="option"], [data-option-value], li[data-value]'
+      const localNodes = container
+        ? (Array.from(
+            container.querySelectorAll(
+              '[role="option"], [data-option-value], [data-automation-id="promptOption"], [data-automation-id="selectOption"], li[data-value]'
+            )
+          ) as HTMLElement[])
+        : [];
+      if (localNodes.length > 0) return localNodes;
+
+      // Check global Workday popup portal in document.body
+      return Array.from(
+        doc.querySelectorAll(
+          '[role="listbox"] [role="option"], [data-automation-id="activeListContainer"] [data-automation-id="promptOption"], [data-automation-id="selectOption"]'
         )
       ) as HTMLElement[];
+    };
 
-      const matchedNode = optionNodes.find((node) => {
-        const text =
-          node.getAttribute("data-option-value") ||
-          node.textContent?.trim() ||
-          "";
-        return matchChoiceText(text, targetStr);
-      });
+    let optionNodes = findOptionNodes();
+    if (optionNodes.length === 0 && !el.getAttribute("data-options")) {
+      // Poll briefly up to 210ms for async Workday portal
+      for (let i = 0; i < 6; i++) {
+        await waitMs(35);
+        optionNodes = findOptionNodes();
+        if (optionNodes.length > 0) break;
+      }
+    }
+
+    if (optionNodes.length > 0) {
+      let matchedNode: HTMLElement | undefined;
+      for (const candidateTarget of fallbackTargets) {
+        matchedNode = optionNodes.find((node) => {
+          const text =
+            node.getAttribute("data-option-value") ||
+            node.getAttribute("data-automation-label") ||
+            node.textContent?.trim() ||
+            "";
+          return matchChoiceText(text, candidateTarget);
+        });
+        if (matchedNode) break;
+      }
 
       if (matchedNode) {
         const chosenText =
           matchedNode.getAttribute("data-option-value") ||
+          matchedNode.getAttribute("data-automation-label") ||
           matchedNode.textContent?.trim() ||
           targetStr;
 
-        matchedNode.click();
+        triggerRealisticClick(matchedNode);
         el.setAttribute("data-selected-value", chosenText);
         if (el instanceof HTMLInputElement) {
           setNativeControlValue(el, chosenText);
-          dispatchInputEvents(el);
+          dispatchInputEvents(el, chosenText);
         } else {
-          // If it's a button combobox, update its label/attribute and dispatch change
           if (el.hasAttribute("data-wsa-combobox-button")) {
             el.textContent = chosenText;
           }
@@ -486,17 +662,19 @@ async function performSingleFillAttempt(
       }
     }
 
-    // If the custom combobox is an <input role="combobox"> with data-options
+    // If the custom combobox is an <input role="combobox">
     if (el instanceof HTMLInputElement) {
       const choices = field.availableChoices;
       const matched =
         choices.length === 0
           ? targetStr
-          : choices.find((c) => matchChoiceText(c, targetStr));
+          : choices.find((c) =>
+              fallbackTargets.some((t) => matchChoiceText(c, t))
+            );
       if (matched) {
         setNativeControlValue(el, matched);
         el.setAttribute("data-selected-value", matched);
-        dispatchInputEvents(el);
+        dispatchInputEvents(el, matched);
         if (el.value === matched) {
           return { verified: true, appliedValue: matched };
         }
@@ -507,7 +685,9 @@ async function performSingleFillAttempt(
     const dataOpts = el.getAttribute("data-options");
     if (dataOpts) {
       const list = dataOpts.split("|").map((s) => s.trim());
-      const matched = list.find((c) => matchChoiceText(c, targetStr));
+      const matched = list.find((c) =>
+        fallbackTargets.some((t) => matchChoiceText(c, t))
+      );
       if (matched) {
         el.setAttribute("data-selected-value", matched);
         el.textContent = matched;
@@ -545,7 +725,7 @@ async function performSingleFillAttempt(
         const shouldCheck = targets.some((t) => matchChoiceText(label, t));
         if (cb.checked !== shouldCheck) {
           cb.checked = shouldCheck;
-          cb.click();
+          triggerRealisticClick(cb);
           dispatchInputEvents(cb);
         }
         if (cb.checked) selected.push(label);
@@ -568,7 +748,7 @@ async function performSingleFillAttempt(
           "";
         if (targets.some((t) => matchChoiceText(text, t))) {
           chip.setAttribute("aria-selected", "true");
-          chip.click();
+          triggerRealisticClick(chip);
           selected.push(text);
         }
       }
@@ -576,6 +756,19 @@ async function performSingleFillAttempt(
         el.setAttribute("data-selected-values", selected.join("|"));
         return { verified: true, appliedValue: selected };
       }
+    }
+
+    // Workday "Type to Add Skills" or searchBox inside multiSelectContainer
+    const searchInput = el.querySelector(
+      'input[type="text"], input[data-automation-id="searchBox"]'
+    ) as HTMLInputElement | null;
+    if (searchInput && targets.length > 0) {
+      const skillText = targets.slice(0, 6).join(", ");
+      searchInput.focus();
+      setNativeControlValue(searchInput, skillText);
+      dispatchInputEvents(searchInput, skillText);
+      el.setAttribute("data-selected-values", targets.slice(0, 6).join("|"));
+      return { verified: true, appliedValue: targets.slice(0, 6) };
     }
 
     return {
@@ -601,8 +794,9 @@ async function performSingleFillAttempt(
       };
     }
 
+    el.focus();
     setNativeControlValue(el, formatted);
-    dispatchInputEvents(el);
+    dispatchInputEvents(el, formatted);
     if (el.value === formatted) {
       return { verified: true, appliedValue: formatted };
     }
@@ -618,8 +812,9 @@ async function performSingleFillAttempt(
       ? desiredValue.join(", ")
       : String(desiredValue);
 
+    el.focus();
     setNativeControlValue(el, strValue);
-    dispatchInputEvents(el);
+    dispatchInputEvents(el, strValue);
 
     if (el.value === strValue) {
       return { verified: true, appliedValue: strValue };

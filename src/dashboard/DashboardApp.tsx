@@ -7,10 +7,12 @@ import {
   PlayCircle,
   Settings,
   UserCheck,
+  Users,
 } from "lucide-react";
 import { SettingsPrivacyView } from "../options/SettingsPrivacyView";
 import { QuestionBankView } from "../question-bank/QuestionBankView";
 import { DEFAULT_SETTINGS, EMPTY_PROFILE } from "../shared/constants";
+import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
 import {
   AnswerType,
   AutofillSession,
@@ -20,7 +22,9 @@ import {
 } from "../shared/types";
 import {
   calculateProfileCompletion,
+  getActiveProfileId,
   getProfile,
+  switchPresetProfile,
 } from "../storage/profile-store";
 import { getQuestions, saveQuestion } from "../storage/question-store";
 import {
@@ -62,6 +66,8 @@ export const DashboardApp: React.FC = () => {
     return "overview";
   });
 
+  const [activeProfileId, setActiveProfileId] =
+    useState<PresetProfileId>("ankit");
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
   const [questions, setQuestions] = useState<QuestionAnswer[]>([]);
   const [settings, setSettings] =
@@ -73,13 +79,15 @@ export const DashboardApp: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const loadAllData = async () => {
-    const [p, q, s, currSess, hist] = await Promise.all([
+    const [pid, p, q, s, currSess, hist] = await Promise.all([
+      getActiveProfileId(),
       getProfile(),
       getQuestions(),
       getSettings(),
       getActiveSession(),
       getSessionHistory(),
     ]);
+    setActiveProfileId(pid);
     setProfile(p);
     setQuestions(q);
     setSettings(s);
@@ -91,6 +99,12 @@ export const DashboardApp: React.FC = () => {
   useEffect(() => {
     void loadAllData();
   }, []);
+
+  const handleSwitchProfile = async (presetId: PresetProfileId) => {
+    const nextProf = await switchPresetProfile(presetId);
+    setActiveProfileId(presetId);
+    setProfile(nextProf);
+  };
 
   const switchTab = (tab: DashboardTab) => {
     setActiveTab(tab);
@@ -198,6 +212,78 @@ export const DashboardApp: React.FC = () => {
             <div style={{ fontSize: 11.5, color: "#94a3b8" }}>
               Smart Multi-Step Extension
             </div>
+          </div>
+        </div>
+
+        {/* Sidebar 1-Click Candidate Switcher (Profile Ankit / Profile Aman) */}
+        <div
+          style={{
+            background: "#1e293b",
+            borderRadius: 10,
+            padding: 10,
+            marginBottom: 14,
+            border: "1px solid #334155",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#94a3b8",
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              marginBottom: 6,
+              display: "flex",
+              alignItems: "center",
+              gap: 5,
+            }}
+          >
+            <Users size={13} /> Active Candidate Profile
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr",
+              gap: 6,
+            }}
+          >
+            {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
+              const isSelected = activeProfileId === pid;
+              return (
+                <button
+                  key={pid}
+                  type="button"
+                  data-testid={`sidebar-switch-${pid}`}
+                  onClick={() => void handleSwitchProfile(pid)}
+                  style={{
+                    padding: "6px 8px",
+                    borderRadius: 6,
+                    border: isSelected
+                      ? "1.5px solid #3b82f6"
+                      : "1px solid #475569",
+                    background: isSelected ? "#2563eb" : "#0f172a",
+                    color: "#ffffff",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  {PRESET_PROFILES[pid].label}
+                </button>
+              );
+            })}
+          </div>
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: "#cbd5e1",
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {profile.personal.fullName} • {profile.personal.email}
           </div>
         </div>
 
@@ -329,8 +415,10 @@ export const DashboardApp: React.FC = () => {
                     Workday Smart Autofill — Dashboard
                   </h1>
                   <p className="card-subtitle">
-                    Intelligent multi-step job application autofill with local
-                    profile management and a reusable Question Bank.
+                    Intelligent multi-step job application autofill with 2
+                    hardcoded ATS resume profiles (<strong>Profile Ankit</strong>{" "}
+                    &amp; <strong>Profile Aman</strong>) and a reusable Workday
+                    Question Bank.
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -352,17 +440,78 @@ export const DashboardApp: React.FC = () => {
                   </button>
                 </div>
               </div>
+
+              {/* 1-Click Candidate Switcher Banner */}
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 12,
+                  marginTop: 12,
+                  paddingTop: 12,
+                  borderTop: "1px solid #e2e8f0",
+                }}
+              >
+                {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
+                  const isSelected = activeProfileId === pid;
+                  const meta = PRESET_PROFILES[pid];
+                  return (
+                    <div
+                      key={pid}
+                      onClick={() => void handleSwitchProfile(pid)}
+                      style={{
+                        padding: "12px 16px",
+                        borderRadius: 10,
+                        border: isSelected
+                          ? "2px solid #2563eb"
+                          : "1px solid #cbd5e1",
+                        background: isSelected ? "#eff6ff" : "#f8fafc",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                      }}
+                    >
+                      <div>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 15,
+                            color: isSelected ? "#1d4ed8" : "#0f172a",
+                          }}
+                        >
+                          {meta.label} — {meta.profile.personal.fullName}
+                        </div>
+                        <div style={{ fontSize: 12.5, color: "#475569" }}>
+                          {meta.subtitle}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#64748b" }}>
+                          {meta.email} • +91 {meta.profile.personal.phone} • GPA:{" "}
+                          {meta.profile.education[0]?.gpa}
+                        </div>
+                      </div>
+                      <span
+                        className={`badge ${
+                          isSelected ? "badge-blue" : "badge-gray"
+                        }`}
+                      >
+                        {isSelected ? "ACTIVE PROFILE" : "Switch to Profile"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* KPI Cards */}
             <div className="grid-4" style={{ marginBottom: 20 }}>
               <div className="stat-card">
-                <span className="stat-label">Saved Profile Completion</span>
-                <span className="stat-value" style={{ color: "#2563eb" }}>
-                  {completion.percentage}%
+                <span className="stat-label">Active Candidate Profile</span>
+                <span className="stat-value" style={{ color: "#2563eb", fontSize: 22 }}>
+                  {PRESET_PROFILES[activeProfileId].label}
                 </span>
                 <span style={{ fontSize: 12, color: "#64748b" }}>
-                  {profile.personal.firstName} {profile.personal.lastName}
+                  {profile.personal.firstName} {profile.personal.lastName} ({completion.percentage}% complete)
                 </span>
               </div>
 
@@ -421,7 +570,9 @@ export const DashboardApp: React.FC = () => {
               {/* Quick Navigation & Profile Summary */}
               <div className="card">
                 <div className="card-header">
-                  <h2 className="card-title">Active Candidate Profile</h2>
+                  <h2 className="card-title">
+                    Active Candidate Details ({PRESET_PROFILES[activeProfileId].label})
+                  </h2>
                   <button
                     type="button"
                     className="btn btn-sm btn-secondary"
@@ -444,7 +595,8 @@ export const DashboardApp: React.FC = () => {
                   </div>
                   <div>
                     <strong>Location:</strong> {profile.personal.city},{" "}
-                    {profile.personal.state}, {profile.personal.country}
+                    {profile.personal.state} {profile.personal.postalCode},{" "}
+                    {profile.personal.country}
                   </div>
                   <div>
                     <strong>Current Role:</strong>{" "}
@@ -452,14 +604,34 @@ export const DashboardApp: React.FC = () => {
                     {profile.professional.currentEmployer}
                   </div>
                   <div>
-                    <strong>Education & Experience Records:</strong>{" "}
-                    {profile.education.length} degree(s),{" "}
-                    {profile.employment.length} role(s)
+                    <strong>Education:</strong> {profile.education[0]?.degree} in{" "}
+                    {profile.education[0]?.fieldOfStudy} —{" "}
+                    {profile.education[0]?.institution} (GPA:{" "}
+                    {profile.education[0]?.gpa})
+                  </div>
+                  <div>
+                    <strong>Links:</strong>{" "}
+                    <a
+                      href={profile.personal.linkedInUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#2563eb", marginRight: 10 }}
+                    >
+                      LinkedIn
+                    </a>
+                    <a
+                      href={profile.personal.githubUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "#2563eb" }}
+                    >
+                      GitHub
+                    </a>
                   </div>
                   <div>
                     <strong>Skills:</strong>{" "}
                     {profile.skillsAndDocs.technicalSkills
-                      .slice(0, 7)
+                      .slice(0, 9)
                       .join(", ")}
                   </div>
                 </div>
@@ -541,6 +713,8 @@ export const DashboardApp: React.FC = () => {
         {/* INTERACTIVE WORKDAY MULTI-STEP SIMULATOR */}
         {activeTab === "simulator" && (
           <WorkdaySimulatorView
+            activeProfileId={activeProfileId}
+            onSwitchProfile={handleSwitchProfile}
             onSessionUpdate={async (updated) => {
               setActiveSession(updated);
               setSessionHistory(await getSessionHistory());
@@ -554,6 +728,8 @@ export const DashboardApp: React.FC = () => {
         {activeTab === "profile" && (
           <ProfileManagerView
             profile={profile}
+            activeProfileId={activeProfileId}
+            onSwitchProfile={handleSwitchProfile}
             onProfileUpdated={(next) => setProfile(next)}
           />
         )}

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { AutofillSessionController } from "../../src/content/session-controller";
 import { storageClearAll } from "../../src/storage/chrome-storage";
+import { switchPresetProfile } from "../../src/storage/profile-store";
 import { getQuestions } from "../../src/storage/question-store";
 
 function delay(ms: number): Promise<void> {
@@ -12,22 +13,23 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     await storageClearAll();
   });
 
-  it("fills Step 1, automatically detects and fills Step 2 on DOM mutation (same URL), captures unanswered questions on Step 3, and stops on Final Review Step", async () => {
+  it("fills Step 1 with Profile Ankit, automatically detects and fills Step 2 on DOM mutation (same URL), captures unanswered questions, and stops on Final Review Step", async () => {
     const appRoot = document.createElement("div");
     appRoot.setAttribute("data-automation-id", "applyFlowPage");
     document.body.appendChild(appRoot);
 
-    // Render Step 1: My Information
+    // Render Step 1: My Information (with real Workday aria-labelledby concatenations)
     appRoot.innerHTML = `
-      <h1 data-automation-id="jobPostingHeader">Principal Software Engineer</h1>
+      <h1 data-automation-id="jobPostingHeader">Java Developer, AVP</h1>
       <div data-automation-id="progressBarActiveStep">Step 1: My Information</div>
+      <div id="secLegal">Legal Name</div>
       <div data-automation-id="formField-legalNameSection_firstName">
-        <label for="step1FirstName">First Name *</label>
-        <input id="step1FirstName" type="text" required />
+        <label id="lblGiven" for="step1FirstName">Given Name(s)*</label>
+        <input id="step1FirstName" aria-labelledby="secLegal lblGiven" type="text" required />
       </div>
       <div data-automation-id="formField-legalNameSection_lastName">
-        <label for="step1LastName">Last Name *</label>
-        <input id="step1LastName" type="text" required />
+        <label id="lblFamily" for="step1LastName">Family Name*</label>
+        <input id="step1LastName" aria-labelledby="secLegal lblFamily" type="text" required />
       </div>
       <div data-automation-id="formField-email">
         <label for="step1Email">Email Address *</label>
@@ -37,7 +39,7 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
 
     const controller = new AutofillSessionController({
       root: appRoot,
-      getUrl: () => "https://nimbus.myworkdayjobs.com/en-US/careers/apply",
+      getUrl: () => "https://db.wd3.myworkdayjobs.com/en-US/DBWebsite/apply",
       debounceMs: 30,
     });
 
@@ -46,17 +48,17 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     expect(session.currentStep).toBe("Step 1: My Information");
     expect(
       (document.getElementById("step1FirstName") as HTMLInputElement).value
-    ).toBe("Alex");
+    ).toBe("Ankit");
     expect(
       (document.getElementById("step1LastName") as HTMLInputElement).value
-    ).toBe("Rivera");
+    ).toBe("Kumar");
     expect(
       (document.getElementById("step1Email") as HTMLInputElement).value
-    ).toBe("alex.rivera.demo@example.com");
+    ).toBe("ankit.kumar.career9@gmail.com");
 
     // Simulate user clicking Next -> Step 2 renders on the SAME URL (with delayed rendering)
     appRoot.innerHTML = `
-      <h1 data-automation-id="jobPostingHeader">Principal Software Engineer</h1>
+      <h1 data-automation-id="jobPostingHeader">Java Developer, AVP</h1>
       <div data-automation-id="progressBarActiveStep">Step 2: Application Questions</div>
       <fieldset>
         <legend>Are you legally authorized to work in the United States? *</legend>
@@ -116,7 +118,7 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     // Simulate user navigating to Final Review Step
     let submitClicked = false;
     appRoot.innerHTML = `
-      <h1 data-automation-id="jobPostingHeader">Principal Software Engineer</h1>
+      <h1 data-automation-id="jobPostingHeader">Java Developer, AVP</h1>
       <h2 data-automation-id="pageHeaderTitle">Review and Submit</h2>
       <button id="finalSubmitBtn" data-automation-id="bottom-navigation-submit-button">Submit Application</button>
     `;
@@ -156,7 +158,7 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
 
     await controller.startAutofill();
     expect((document.getElementById("cityField") as HTMLInputElement).value).toBe(
-      "San Francisco"
+      "Pune"
     );
 
     // Pause session
@@ -177,20 +179,111 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     // Resume session -> immediately fills Step 2
     await controller.resumeSession();
     expect((document.getElementById("stateField") as HTMLInputElement).value).toBe(
-      "California"
+      "Maharashtra"
     );
 
-    // Simulate back navigation where user had customized City to "Oakland"
+    // Simulate back navigation where user had customized City to "Mumbai"
     currentUrl = "https://acme.myworkdayjobs.com/apply/step-1";
     appRoot.innerHTML = `
       <div data-automation-id="progressBarActiveStep">Step 1: Contact</div>
       <label for="cityField">City</label>
-      <input id="cityField" type="text" value="Oakland" />
+      <input id="cityField" type="text" value="Mumbai" />
     `;
     await delay(90);
-    // Must preserve user's custom "Oakland" value on back navigation
+    // Must preserve user's custom "Mumbai" value on back navigation
     expect((document.getElementById("cityField") as HTMLInputElement).value).toBe(
-      "Oakland"
+      "Mumbai"
+    );
+
+    controller.stopObservers();
+    appRoot.remove();
+  });
+
+  it("autofills real Deutsche Bank Workday sections (Work Experience 1 & 2, Education 1 with GPA, AI Consent, Voluntary Disclosures) for both Profile Ankit and Profile Aman", async () => {
+    const appRoot = document.createElement("div");
+    document.body.appendChild(appRoot);
+
+    appRoot.innerHTML = `
+      <div data-automation-id="progressBarActiveStep">Step 2 of 5: My Experience</div>
+      <div data-automation-id="workExperienceSection">
+        <h4>Work Experience 1</h4>
+        <label for="exp1Title">Job Title*</label>
+        <input id="exp1Title" type="text" />
+        <label for="exp1Company">Company*</label>
+        <input id="exp1Company" type="text" />
+        <label for="exp1From">From* current value is MM/YYYY</label>
+        <input id="exp1From" type="text" placeholder="MM/YYYY" />
+      </div>
+      <div data-automation-id="workExperienceSection">
+        <h4>Work Experience 2</h4>
+        <label for="exp2Title">Job Title*</label>
+        <input id="exp2Title" type="text" />
+        <label for="exp2Company">Company*</label>
+        <input id="exp2Company" type="text" />
+      </div>
+      <div data-automation-id="educationSection">
+        <h4>Education 1</h4>
+        <label for="eduSchool">School or University*</label>
+        <input id="eduSchool" type="text" />
+        <label for="eduGpa">Overall Result (GPA)</label>
+        <input id="eduGpa" type="text" />
+        <label for="eduFrom">From current value is YYYY</label>
+        <input id="eduFrom" type="text" placeholder="YYYY" />
+      </div>
+      <div>
+        <label for="dbAiConsent">Deutsche Bank utilizes Artificial Intelligence (AI) to assist in various aspects of the recruitment process. Do you consent to the use of Artificial Intelligence (AI) during the recruitment process?*</label>
+        <select id="dbAiConsent">
+          <option value="">Select One</option>
+          <option value="Yes">Yes</option>
+          <option value="No">No</option>
+        </select>
+      </div>
+      <div>
+        <label><input type="checkbox" id="dbTerms" /> Yes, I have read and consent to the terms and conditions*</label>
+      </div>
+    `;
+
+    const controller = new AutofillSessionController({
+      root: appRoot,
+      getUrl: () => "https://db.wd3.myworkdayjobs.com/en-US/DBWebsite/apply/experience",
+      debounceMs: 30,
+    });
+
+    await controller.startAutofill({ overwriteExisting: true });
+
+    expect((document.getElementById("exp1Company") as HTMLInputElement).value).toBe(
+      "Scalar TechHub"
+    );
+    expect((document.getElementById("exp1From") as HTMLInputElement).value).toBe(
+      "09/2025"
+    );
+    expect((document.getElementById("exp2Company") as HTMLInputElement).value).toBe(
+      "MobiCloud Technologies"
+    );
+    expect((document.getElementById("eduSchool") as HTMLInputElement).value).toBe(
+      "Ajeenkya DY Patil University, Pune"
+    );
+    expect((document.getElementById("eduGpa") as HTMLInputElement).value).toBe(
+      "9.13"
+    );
+    expect((document.getElementById("eduFrom") as HTMLInputElement).value).toBe(
+      "2022"
+    );
+    expect((document.getElementById("dbAiConsent") as HTMLSelectElement).value).toBe(
+      "Yes"
+    );
+    expect((document.getElementById("dbTerms") as HTMLInputElement).checked).toBe(
+      true
+    );
+
+    // Switch to Profile Aman and refill
+    await switchPresetProfile("aman");
+    await controller.fillCurrentStep({ overwriteExisting: true });
+    expect((document.getElementById("eduGpa") as HTMLInputElement).value).toBe(
+      "8.93"
+    );
+    expect((document.getElementById("exp1Title") as HTMLInputElement).value).toBe(
+      "MEAN Stack Developer"
     );
 
     controller.stopObservers();

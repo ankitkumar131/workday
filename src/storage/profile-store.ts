@@ -1,17 +1,63 @@
 import { EMPTY_PROFILE, STORAGE_KEYS } from "../shared/constants";
-import { SAMPLE_PROFILE } from "../shared/sample-data";
+import {
+  AMAN_PROFILE,
+  ANKIT_PROFILE,
+  PRESET_PROFILES,
+  PresetProfileId,
+  SAMPLE_PROFILE,
+} from "../shared/sample-data";
 import { UserProfile } from "../shared/types";
 import { sanitizeString, validateProfileInput } from "../shared/validation";
 import { storageGet, storageSet } from "./chrome-storage";
+
+export async function getActiveProfileId(): Promise<PresetProfileId> {
+  const id = await storageGet<string>(STORAGE_KEYS.ACTIVE_PROFILE_ID, "ankit");
+  return id === "aman" ? "aman" : "ankit";
+}
+
+export async function getProfilesMap(): Promise<
+  Record<PresetProfileId, UserProfile>
+> {
+  const storedMap = await storageGet<Record<
+    PresetProfileId,
+    UserProfile
+  > | null>(STORAGE_KEYS.CUSTOM_PROFILES_MAP, null);
+
+  if (storedMap && storedMap.ankit && storedMap.aman) {
+    return {
+      ankit: normalizeProfileStructure(storedMap.ankit),
+      aman: normalizeProfileStructure(storedMap.aman),
+    };
+  }
+
+  const initialMap: Record<PresetProfileId, UserProfile> = {
+    ankit: structuredClone(ANKIT_PROFILE),
+    aman: structuredClone(AMAN_PROFILE),
+  };
+  await storageSet(STORAGE_KEYS.CUSTOM_PROFILES_MAP, initialMap);
+  return initialMap;
+}
+
+export async function switchPresetProfile(
+  profileId: PresetProfileId
+): Promise<UserProfile> {
+  const map = await getProfilesMap();
+  const target = map[profileId] || structuredClone(PRESET_PROFILES[profileId].profile);
+  await storageSet(STORAGE_KEYS.ACTIVE_PROFILE_ID, profileId);
+  await storageSet(STORAGE_KEYS.PROFILE, target);
+  await storageSet(STORAGE_KEYS.INITIALIZED, true);
+  return target;
+}
 
 export async function getProfile(): Promise<UserProfile> {
   const initialized = await storageGet<boolean>(STORAGE_KEYS.INITIALIZED, false);
   const stored = await storageGet<UserProfile | null>(STORAGE_KEYS.PROFILE, null);
 
   if (!stored) {
+    const activeId = await getActiveProfileId();
     const initialProfile = initialized
       ? structuredClone(EMPTY_PROFILE)
-      : structuredClone(SAMPLE_PROFILE);
+      : structuredClone(PRESET_PROFILES[activeId].profile);
     await storageSet(STORAGE_KEYS.PROFILE, initialProfile);
     if (!initialized) {
       await storageSet(STORAGE_KEYS.INITIALIZED, true);
@@ -32,7 +78,7 @@ export function normalizeProfileStructure(raw: Partial<UserProfile>): UserProfil
       lastName: sanitizeString(raw.personal?.lastName ?? ""),
       preferredName: sanitizeString(raw.personal?.preferredName ?? ""),
       email: sanitizeString(raw.personal?.email ?? ""),
-      phoneCountryCode: sanitizeString(raw.personal?.phoneCountryCode ?? "+1"),
+      phoneCountryCode: sanitizeString(raw.personal?.phoneCountryCode ?? "+91"),
       phone: sanitizeString(raw.personal?.phone ?? ""),
       addressLine1: sanitizeString(raw.personal?.addressLine1 ?? ""),
       addressLine2: sanitizeString(raw.personal?.addressLine2 ?? ""),
@@ -144,6 +190,12 @@ export async function saveProfile(
   if (!saved) {
     return { ok: false, errors: ["Failed to persist profile to local storage."] };
   }
+
+  const activeId = await getActiveProfileId();
+  const map = await getProfilesMap();
+  map[activeId] = normalized;
+  await storageSet(STORAGE_KEYS.CUSTOM_PROFILES_MAP, map);
+
   return { ok: true, profile: normalized };
 }
 
@@ -154,10 +206,21 @@ export async function resetProfileToEmpty(): Promise<UserProfile> {
   return empty;
 }
 
-export async function loadSampleProfile(): Promise<UserProfile> {
-  const sample = structuredClone(SAMPLE_PROFILE);
+export async function loadSampleProfile(
+  presetId?: PresetProfileId
+): Promise<UserProfile> {
+  const targetId = presetId || (await getActiveProfileId());
+  const sample = structuredClone(
+    PRESET_PROFILES[targetId]?.profile || SAMPLE_PROFILE
+  );
   sample.updatedAt = Date.now();
+  await storageSet(STORAGE_KEYS.ACTIVE_PROFILE_ID, targetId);
   await storageSet(STORAGE_KEYS.PROFILE, sample);
+
+  const map = await getProfilesMap();
+  map[targetId] = sample;
+  await storageSet(STORAGE_KEYS.CUSTOM_PROFILES_MAP, map);
+
   return sample;
 }
 

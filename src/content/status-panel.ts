@@ -1,10 +1,16 @@
+import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
 import { AnswerType, AutofillSession } from "../shared/types";
 import { escapeHtml } from "../shared/validation";
+import {
+  getActiveProfileId,
+  switchPresetProfile,
+} from "../storage/profile-store";
 import { AutofillSessionController } from "./session-controller";
 
 /**
  * Non-intrusive, collapsible, repositionable in-page Application Status Panel
- * for Workday job application pages.
+ * for Workday job application pages. Includes a 1-click Profile Switcher
+ * between Profile Ankit and Profile Aman.
  */
 export class FloatingStatusPanel {
   private container: HTMLElement | null = null;
@@ -12,6 +18,7 @@ export class FloatingStatusPanel {
   private corner: "bottom-right" | "bottom-left" = "bottom-right";
   private showUnansweredDrawer = false;
   private showReviewDrawer = false;
+  private activeProfileId: PresetProfileId = "ankit";
 
   constructor(private readonly controller: AutofillSessionController) {}
 
@@ -26,6 +33,11 @@ export class FloatingStatusPanel {
       this.container.setAttribute("data-wsa-ignore", "true");
       parent.appendChild(this.container);
     }
+
+    void getActiveProfileId().then((pid) => {
+      this.activeProfileId = pid;
+      this.render(this.controller.getCurrentSession());
+    });
 
     this.controller.subscribe((session) => {
       this.render(session);
@@ -69,7 +81,7 @@ export class FloatingStatusPanel {
       position: fixed;
       bottom: 20px;
       ${posStyle}
-      width: ${this.collapsed ? "230px" : "355px"};
+      width: ${this.collapsed ? "230px" : "360px"};
       max-height: 85vh;
       overflow-y: auto;
       background: #ffffff;
@@ -170,6 +182,9 @@ export class FloatingStatusPanel {
       `
         : "";
 
+    const isAnkit = this.activeProfileId === "ankit";
+    const isAman = this.activeProfileId === "aman";
+
     this.container.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#0f172a;color:#ffffff;border-radius:11px 11px 0 0;">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -183,6 +198,32 @@ export class FloatingStatusPanel {
       </div>
 
       <div style="padding:12px 14px;">
+        <!-- 1-Click Candidate Profile Switcher -->
+        <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:10px;">
+          <div style="font-size:10.5px;font-weight:700;color:#475569;text-transform:uppercase;margin-bottom:5px;display:flex;justify-content:space-between;">
+            <span>Active Profile</span>
+            <span style="color:#2563eb;">${escapeHtml(
+              PRESET_PROFILES[this.activeProfileId].label
+            )}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+            <button data-wsa-action="switch-profile" data-profile="ankit" style="padding:5px 8px;border-radius:6px;border:${
+              isAnkit ? "2px solid #2563eb" : "1px solid #cbd5e1"
+            };background:${isAnkit ? "#eff6ff" : "#ffffff"};color:${
+      isAnkit ? "#1d4ed8" : "#334155"
+    };font-weight:600;font-size:11.5px;cursor:pointer;">
+              Profile Ankit
+            </button>
+            <button data-wsa-action="switch-profile" data-profile="aman" style="padding:5px 8px;border-radius:6px;border:${
+              isAman ? "2px solid #2563eb" : "1px solid #cbd5e1"
+            };background:${isAman ? "#eff6ff" : "#ffffff"};color:${
+      isAman ? "#1d4ed8" : "#334155"
+    };font-weight:600;font-size:11.5px;cursor:pointer;">
+              Profile Aman
+            </button>
+          </div>
+        </div>
+
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <span style="font-size:12px;color:#475569;">
             Step: <strong style="color:#0f172a;">${escapeHtml(
@@ -284,10 +325,16 @@ export class FloatingStatusPanel {
             this.corner =
               this.corner === "bottom-right" ? "bottom-left" : "bottom-right";
             this.render(this.controller.getCurrentSession());
+          } else if (action === "switch-profile") {
+            const pid = (btn.getAttribute("data-profile") ||
+              "ankit") as PresetProfileId;
+            this.activeProfileId = pid;
+            await switchPresetProfile(pid);
+            this.render(this.controller.getCurrentSession());
           } else if (action === "start-autofill") {
             await this.controller.startAutofill();
           } else if (action === "fill-step") {
-            await this.controller.fillCurrentStep();
+            await this.controller.fillCurrentStep({ overwriteExisting: true });
           } else if (action === "pause") {
             await this.controller.pauseSession();
           } else if (action === "resume") {

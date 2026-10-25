@@ -96,7 +96,7 @@ describe("Phase 9: Reliability, Session Recovery & Floating Status Panel", () =>
     await delay(50);
     expect(
       (document.getElementById("postalCode2") as HTMLInputElement).value
-    ).toBe("94107");
+    ).toBe("411047");
 
     secondController.stopObservers();
     step2Root.remove();
