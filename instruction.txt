@@ -1,0 +1,770 @@
+# Project: Workday Smart Autofill — Intelligent Multi-Step Job Application Browser Extension
+
+## 1. Role and Objective
+
+Act as a senior browser-extension engineer, frontend developer, UX designer, and test engineer.
+
+Build a production-quality Chromium browser extension named **Workday Smart Autofill** that automates repetitive data entry across multi-step Workday job application forms.
+
+The extension must allow users to save their personal profile, resume information, reusable questions and answers, and preferred answers for different field types. When a user opens a supported Workday job application and starts autofill, the extension should populate the current page, detect subsequent application steps, and continue filling the newly rendered fields automatically.
+
+The product must be reliable, privacy-conscious, modular, maintainable, and usable by a nontechnical person.
+
+Do not build just a UI prototype. Implement a functional extension with working storage, field detection, form filling, multi-step navigation detection, question management, validation, and testing.
+
+## 2. Target Platform
+
+Build the first version for:
+- Google Chrome.
+- Microsoft Edge.
+- Brave and other Chromium-based browsers where compatible.
+- Workday-hosted recruitment and job application pages.
+
+Use Chrome Extension Manifest V3.
+
+Prioritize Workday domains such as `*.myworkdayjobs.com` and other Workday-hosted application pages that can be explicitly configured by the user.
+
+Use narrowly scoped host permissions wherever possible. Request additional website access only when required and with clear user consent.
+
+## 3. Core Product Requirements
+
+### A. User Profile Management
+
+Create an options/dashboard interface where users can save reusable personal and professional information.
+
+Organize the profile into sections:
+
+**Personal information**
+- First name.
+- Middle name.
+- Last name.
+- Preferred name.
+- Email address.
+- Phone number and country code.
+- Current address.
+- City, state, postal code, and country.
+- LinkedIn URL.
+- GitHub URL.
+- Portfolio URL.
+
+**Professional information**
+- Professional summary.
+- Current job title.
+- Previous job title.
+- Current employer.
+- Previous employers.
+- Total years of experience.
+- Notice period.
+- Current salary, if the user chooses to store it.
+- Expected salary.
+- Preferred work location.
+- Willingness to relocate.
+- Employment type preference.
+
+**Education**
+- Degree.
+- Field of study.
+- Institution.
+- Start date.
+- Graduation date.
+- GPA or percentage.
+- Multiple education records.
+
+**Employment history**
+- Employer name.
+- Job title.
+- Employment type.
+- Location.
+- Start and end dates.
+- Currently employed status.
+- Responsibilities.
+- Achievements.
+- Skills used.
+- Multiple employment records.
+
+**Skills and documents**
+- Technical skills.
+- Soft skills.
+- Certifications.
+- Projects.
+- Resume.
+- Cover letter.
+- Other relevant information.
+
+Allow multiple education, employment, certification, and project records.
+
+Users must be able to add, edit, delete, and reorder records.
+
+Support importing a resume PDF or DOCX where practical. Extract text locally when possible, present extracted information for review, and never assume extracted details are correct without confirmation.
+
+### B. Reusable Question-and-Answer Library
+
+This is one of the most important features.
+
+Create a dedicated **Question Bank** page where users can maintain an unlimited collection of reusable question-and-answer entries.
+
+Each entry should contain:
+- Unique ID.
+- Question text.
+- Canonical question or normalized version.
+- Answer.
+- Answer type.
+- Optional category.
+- Optional tags.
+- Matching keywords or alternative question phrasings.
+- Exact-match or semantic-match preference.
+- Priority.
+- Enabled/disabled status.
+- Created and updated timestamps.
+
+Example question categories:
+- Personal information.
+- Employment eligibility.
+- Work authorization.
+- Visa sponsorship.
+- Relocation.
+- Availability and notice period.
+- Education.
+- Experience.
+- Technical skills.
+- Salary expectations.
+- Behavioral questions.
+- Employer-specific questions.
+- Diversity and demographic questions.
+
+Provide filters, search, sorting, and category-based organization.
+
+Users should be able to create, edit, duplicate, disable, and delete individual entries.
+
+Provide import and export functionality using JSON or CSV, with validation and clear error messages.
+
+### C. Supported Answer Types
+
+Every saved question must support the following answer types.
+
+**1. Input text**
+- Short text.
+- Email.
+- Phone.
+- Number.
+- URL.
+- Date.
+- Multiline text or textarea.
+
+**2. Radio button**
+- Save the preferred option.
+- Match the saved answer against the available choices on the page.
+- Select the corresponding radio option.
+- Support Yes/No, single-choice eligibility questions, and other single-select questions.
+
+**3. Dropdown**
+- Save the preferred option.
+- Match the saved answer to native HTML select options.
+- Support custom Workday dropdowns and comboboxes.
+- Open the dropdown, identify available options, select the matching option, and verify the selected value.
+- Support spelling differences and harmless differences in capitalization where appropriate.
+
+**4. Checkbox**
+- Store a true/false preference for ordinary, non-declaration checkboxes.
+- Support checkbox groups where the user has explicitly selected multiple preferred options.
+- Do not automatically accept legal declarations or certify statements without explicit user approval.
+
+**5. Multi-select**
+- Support multiple selected options.
+- Match each selected value against the available choices.
+- Verify the final selections.
+
+**6. Date**
+- Support dates in different display formats.
+- Respect the date format expected by the form.
+- Do not guess missing dates.
+
+**7. Long-answer questions**
+- Store reusable paragraphs or longer responses.
+- Support questions such as “Why do you want to work here?” or “Describe your relevant experience.”
+- Allow the user to edit the answer before it is filled.
+- If AI-generated answers are added, use only verified profile facts and clearly identify generated text for review.
+
+The Question Bank UI must dynamically display the correct editor according to the selected answer type.
+
+For example:
+- Selecting Input Text displays a text editor.
+- Selecting Radio displays an option editor and a preferred answer selector.
+- Selecting Dropdown displays a list of choices and a preferred answer selector.
+- Selecting Checkbox displays a boolean control or multiple-choice configuration.
+
+Validate entries before saving.
+
+### D. Smart Question Matching
+
+Implement a reliable question-matching engine.
+
+Use the following matching priority:
+
+1. Exact normalized question match.
+2. Exact match against a saved alternative phrasing.
+3. Strong keyword or phrase match.
+4. Semantic similarity, if an optional AI integration is enabled and configured.
+5. Otherwise, mark the question as unanswered.
+
+Normalize questions by:
+- Converting text to lowercase for matching.
+- Trimming whitespace.
+- Collapsing repeated spaces.
+- Normalizing harmless punctuation differences.
+- Preserving the original question for display.
+- Avoiding destructive normalization of important meaning.
+
+Do not rely on the input placeholder alone.
+
+Use accessible labels, associated labels, `aria-label`, `aria-labelledby`, relevant Workday automation attributes, field names, and nearby question text to identify fields.
+
+For similar but nonidentical questions, require a sufficiently strong match. If multiple saved answers could apply, flag the field for review instead of choosing arbitrarily.
+
+Never fabricate answers to eligibility, legal, demographic, salary, or other personal questions.
+
+### E. Workday Form Detection
+
+Build a robust field-detection engine that recognizes:
+
+- Text inputs.
+- Email and telephone inputs.
+- Number inputs.
+- Date inputs and date pickers.
+- Textareas.
+- Native select elements.
+- Radio buttons.
+- Checkboxes.
+- Custom dropdowns.
+- ARIA comboboxes.
+- Multi-select controls.
+- Dynamically rendered form fields.
+- Repeated employment-history and education sections.
+- Fields with labels outside the immediate input container.
+
+For each detected field, collect:
+- Label or question text.
+- Input type.
+- Available choices.
+- Current value.
+- Required status.
+- Disabled or read-only status.
+- Associated question-bank entry, if any.
+- Confidence score.
+- Fill status.
+- Any error or validation message.
+
+Use stable, accessible selectors and Workday-specific automation attributes where available.
+
+Do not assume that all Workday tenants use identical DOM structures. Implement a modular adapter system so additional Workday variants can be supported without rewriting the entire extension.
+
+### F. Reliable Field Filling
+
+Create a field-filling engine that correctly interacts with modern frontend frameworks.
+
+Requirements:
+- Use appropriate native input setters when necessary.
+- Dispatch the appropriate `input` and `change` events.
+- Support blur or focus events only when required.
+- Handle React-like controlled inputs and dynamically managed form state.
+- Verify the value after filling.
+- Detect rejected or reverted values.
+- Highlight successfully filled fields temporarily.
+- Visually distinguish skipped, unmatched, failed, and review-required fields.
+
+For dropdowns and custom controls, use the actual UI interaction path where necessary. Do not simply change an internal attribute and assume the selection succeeded.
+
+Avoid overwriting nonempty fields unless the user enables an explicit overwrite option.
+
+Do not attempt to bypass authentication, CAPTCHAs, bot protections, or website security controls.
+
+Never attempt to set a browser file input's value programmatically. Allow the user to select or upload the resume through the normal file picker.
+
+### G. Automatic Multi-Step Form Continuation
+
+This is a critical feature.
+
+Implement a persistent application-filling session.
+
+Expected workflow:
+
+1. The user opens a Workday job application.
+2. The extension detects a supported application page.
+3. The user clicks **Start Autofill** or explicitly enables automatic filling for that application.
+4. The extension scans the current step.
+5. It fills all eligible fields with confidently matched answers.
+6. It records the results for the current step.
+7. The user reviews the fields and clicks the website's Next button.
+8. The extension detects the new step or newly rendered fields.
+9. It waits for the new form to stabilize.
+10. It scans the new step and fills matching fields.
+11. It repeats this process until the application reaches its final review or submission step.
+
+Use a `MutationObserver` to detect relevant DOM changes, together with route-change detection for single-page application navigation.
+
+Do not continuously rescan the entire document without limits. Debounce observer events, ignore irrelevant mutations, and use a scan-in-progress guard.
+
+Support:
+- Full page navigations.
+- Single-page application route changes.
+- Forms that render asynchronously.
+- Steps that reuse the same URL.
+- Back navigation to previously visited steps.
+- Re-rendered fields.
+- Repeated sections such as work experience and education.
+- Pausing and resuming an autofill session.
+- Cancelling an active session.
+
+Maintain an application session containing:
+- Session ID.
+- Current application URL.
+- Current job title or posting information, when detectable.
+- Current step identifier.
+- Previously processed field fingerprints.
+- Successfully filled fields.
+- Skipped fields.
+- Unanswered questions.
+- Errors.
+- Session state.
+
+Persist only the session information necessary to resume safely.
+
+When a new step appears, do not blindly refill fields that have already been completed. Recheck the actual current values and fill only eligible empty or explicitly overwrite-enabled fields.
+
+Do not automatically click Next, Submit, or Finish by default. The user should control navigation and final submission.
+
+If a session is interrupted, provide a Resume Autofill action when the user returns to the same application.
+
+### H. Application Status Panel
+
+Create a small, nonintrusive floating panel or extension side panel.
+
+Display:
+- Autofill enabled/paused status.
+- Current step.
+- Fields detected.
+- Fields filled.
+- Questions matched.
+- Unanswered questions.
+- Fields requiring review.
+- Errors.
+
+Provide buttons for:
+- Start Autofill.
+- Fill Current Step.
+- Pause.
+- Resume.
+- Stop Session.
+- Open Question Bank.
+- Review Unanswered Questions.
+
+Allow the panel to be collapsed or repositioned if implemented as a floating panel.
+
+Do not obstruct the actual form or cover important controls.
+
+### I. Unanswered Questions Workflow
+
+When the extension finds a field without a reliable answer:
+
+1. Leave the field unchanged.
+2. Mark it as unanswered.
+3. Display the question in the extension panel.
+4. Allow the user to enter the answer manually.
+5. Offer a checkbox or action to save the answer to the Question Bank.
+6. Allow the user to select the answer type.
+7. Save the entry after validation.
+8. Reuse it when the same or sufficiently similar question appears in future applications.
+
+Provide a **Save Answer for Future Applications** action directly from an unanswered-question review screen.
+
+When a question is answered during the current session, allow the extension to fill that field and continue monitoring later steps.
+
+### J. Explicit User Review and Submission
+
+Autofill is not the same as submitting an application.
+
+The extension must never silently submit an application or certify a declaration on behalf of the user.
+
+Before final submission, show a review summary of:
+- Filled fields.
+- Unanswered fields.
+- Potentially ambiguous matches.
+- Sensitive questions requiring confirmation.
+- Validation errors.
+- Any values that may need correction.
+
+The user must manually review and submit the application using the employer's own interface.
+
+Never automatically answer a question merely because doing so would allow the application to proceed.
+
+## 4. User Interface and Experience
+
+Build a polished, professional interface.
+
+Use a modern design system with:
+- Clean typography.
+- Consistent spacing.
+- Clear labels.
+- Accessible contrast.
+- Responsive layouts.
+- Useful empty states.
+- Inline validation.
+- Searchable lists.
+- Confirmation dialogs for destructive actions.
+- Success, warning, and error notifications.
+
+Required screens:
+
+### Screen 1: Extension Popup
+- Extension status.
+- Start Autofill.
+- Fill Current Step.
+- Pause or Resume.
+- Quick progress summary.
+- Open Dashboard.
+
+### Screen 2: Dashboard
+- Overview of saved profile completion.
+- Number of saved questions.
+- Recent autofill sessions.
+- Current session status.
+- Quick navigation to settings and Question Bank.
+
+### Screen 3: Profile Manager
+- Editable profile sections.
+- Repeatable education and employment entries.
+- Resume import and preview.
+- Save and reset actions.
+
+### Screen 4: Question Bank
+- Search and filters.
+- Question list.
+- Answer type.
+- Category.
+- Matching rule.
+- Add Question.
+- Edit, duplicate, enable, disable, and delete actions.
+
+### Screen 5: Add/Edit Question
+Fields:
+- Question.
+- Answer type.
+- Answer editor.
+- Options, when applicable.
+- Preferred answer.
+- Alternative phrasings.
+- Category.
+- Tags.
+- Matching strategy.
+- Enabled status.
+
+### Screen 6: Unanswered Questions
+- Unanswered question text.
+- Available form options.
+- Suggested matching answers, if any.
+- Answer editor.
+- Save to Question Bank.
+- Skip for now.
+
+### Screen 7: Settings and Privacy
+- Autofill behavior.
+- Overwrite policy.
+- Automatic continuation toggle.
+- Match-confidence threshold.
+- Website permissions.
+- Import/export.
+- Clear stored data.
+- Privacy explanation.
+
+## 5. Technical Architecture
+
+Use a modular architecture with clearly separated responsibilities.
+
+Suggested stack:
+- TypeScript for extension logic.
+- HTML, CSS, and TypeScript for the UI.
+- React with Vite for the popup and dashboard if appropriate.
+- Chrome Extension Manifest V3.
+- `chrome.storage.local` for user profiles, question entries, settings, and session state.
+- Content scripts for detecting and filling webpage forms.
+- A service worker for extension lifecycle events and message coordination.
+- Options page or dashboard for profile and question management.
+- Optional side panel for persistent progress visibility.
+
+Suggested structure:
+
+workday-smart-autofill/
+├── manifest.json
+├── package.json
+├── tsconfig.json
+├── vite.config.ts
+├── public/
+│   └── icons/
+├── src/
+│   ├── background/
+│   │   └── service-worker.ts
+│   ├── content/
+│   │   ├── content-script.ts
+│   │   ├── field-detector.ts
+│   │   ├── field-filler.ts
+│   │   ├── workday-adapter.ts
+│   │   ├── mutation-observer.ts
+│   │   ├── route-observer.ts
+│   │   └── session-controller.ts
+│   ├── matching/
+│   │   ├── normalize-question.ts
+│   │   ├── exact-matcher.ts
+│   │   ├── keyword-matcher.ts
+│   │   └── confidence.ts
+│   ├── storage/
+│   │   ├── profile-store.ts
+│   │   ├── question-store.ts
+│   │   └── session-store.ts
+│   ├── popup/
+│   ├── dashboard/
+│   ├── options/
+│   ├── question-bank/
+│   ├── unanswered/
+│   ├── shared/
+│   │   ├── types.ts
+│   │   ├── messages.ts
+│   │   ├── validation.ts
+│   │   └── constants.ts
+│   └── styles/
+├── tests/
+│   ├── matching/
+│   ├── field-detection/
+│   ├── field-filling/
+│   └── multi-step/
+└── README.md
+
+You may adjust this structure to suit the selected build tooling, but preserve separation between UI, storage, matching, field detection, and application-session management.
+
+## 6. Data Models
+
+Define strict TypeScript interfaces.
+
+Example:
+
+```ts
+type AnswerType =
+  | "text"
+  | "textarea"
+  | "email"
+  | "phone"
+  | "number"
+  | "date"
+  | "radio"
+  | "dropdown"
+  | "checkbox"
+  | "multiselect";
+
+interface QuestionAnswer {
+  id: string;
+  question: string;
+  normalizedQuestion: string;
+  answerType: AnswerType;
+  answer: string | string[] | boolean;
+  options?: string[];
+  alternativeQuestions?: string[];
+  keywords?: string[];
+  category?: string;
+  tags?: string[];
+  matchingMode: "exact" | "keyword" | "semantic";
+  enabled: boolean;
+  requiresConfirmation?: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface FieldMatchResult {
+  fieldFingerprint: string;
+  questionText: string;
+  answerId?: string;
+  confidence: number;
+  status:
+    | "matched"
+    | "filled"
+    | "skipped"
+    | "unanswered"
+    | "ambiguous"
+    | "failed"
+    | "needs-review";
+  reason?: string;
+}
+
+interface AutofillSession {
+  id: string;
+  origin: string;
+  applicationUrl: string;
+  currentStep?: string;
+  status: "active" | "paused" | "completed" | "cancelled";
+  results: FieldMatchResult[];
+  startedAt: number;
+  updatedAt: number;
+}
+```
+
+Expand the types as necessary for profile data, repeated records, select options, and field metadata.
+
+Use schema validation for imported data and storage migrations. Do not trust arbitrary imported JSON.
+
+## 7. Storage and Privacy
+
+Default to local-first operation.
+
+Requirements:
+- Store profile and Question Bank data locally.
+- Do not transmit personal information to a backend by default.
+- Do not collect browsing history or inspect unrelated pages.
+- Avoid unnecessary permissions.
+- Never store employer account passwords, session cookies, authentication tokens, or payment information.
+- Never transmit resume contents or application answers to analytics services.
+- Provide clear export and delete controls.
+- Protect against accidentally exposing personal data through logs.
+- Sanitize any text rendered in extension UI.
+- Validate imported files and prevent unsafe HTML execution.
+- Explain that local browser storage is not equivalent to encrypted secret storage.
+- Do not use remote executable code.
+
+If optional AI matching is implemented, make it disabled by default. Explain exactly which data is sent to the selected provider, obtain explicit consent, and send only the minimum necessary information.
+
+## 8. Performance and Reliability
+
+The extension must:
+- Avoid infinite MutationObserver loops.
+- Debounce repeated DOM events.
+- Avoid duplicate filling.
+- Handle stale DOM references.
+- Re-detect fields after a rerender.
+- Avoid scanning unrelated pages.
+- Recover from service-worker suspension.
+- Handle storage errors.
+- Handle malformed question entries.
+- Handle missing or inaccessible fields.
+- Use timeouts for dynamic widgets.
+- Provide useful diagnostics without exposing personal data.
+- Avoid freezing or noticeably slowing the Workday page.
+
+Build a retry mechanism for transient rendering failures, with a limited retry count and clear failure status.
+
+## 9. Testing Requirements
+
+Create automated tests for:
+
+**Question matching**
+- Exact question.
+- Case and whitespace differences.
+- Punctuation differences.
+- Alternative question phrasings.
+- Ambiguous questions.
+- Disabled answers.
+- Missing answers.
+- Similar questions with different meanings.
+
+**Field detection**
+- Input.
+- Textarea.
+- Native select.
+- Radio.
+- Checkbox.
+- Custom dropdown.
+- ARIA combobox.
+- Required field.
+- Hidden field.
+- Disabled field.
+- Dynamically rendered field.
+
+**Field filling**
+- Text value.
+- Multiline answer.
+- Radio selection.
+- Native dropdown selection.
+- Custom dropdown interaction.
+- Checkbox state.
+- Date format.
+- Value verification.
+- Existing-value protection.
+- Failure and recovery.
+
+**Multi-step workflows**
+- Initial page filling.
+- Next-step detection.
+- Same-URL step changes.
+- Route changes.
+- Delayed rendering.
+- Back navigation.
+- Session pause and resume.
+- Duplicate prevention.
+- Unanswered questions on later steps.
+- Final review step.
+- Manual submission requirement.
+
+Use mock application pages for automated testing. Where a real Workday environment is unavailable, document which behaviors remain unverified.
+
+## 10. Definition of Done
+
+The extension is complete only when:
+
+1. It installs successfully as an unpacked Chromium extension.
+2. The user can create and edit a persistent profile.
+3. The user can create questions with text, radio, dropdown, checkbox, date, and multiline answer types.
+4. Question Bank entries persist after the browser restarts.
+5. The extension detects supported Workday application fields.
+6. It fills matching fields and verifies the results.
+7. It leaves uncertain questions unanswered.
+8. It detects the next application step after the user navigates.
+9. It automatically processes newly rendered fields while the session is active.
+10. It avoids overwriting previously entered values unless explicitly configured.
+11. It provides a working unanswered-question workflow.
+12. It resumes interrupted sessions safely.
+13. It never submits an application automatically.
+14. It passes the core automated tests.
+15. It includes installation, configuration, testing, troubleshooting, and privacy documentation.
+
+## 11. Development Workflow
+
+Work incrementally.
+
+Phase 1: Inspect the project environment, initialize the extension, configure Manifest V3, and make the extension load successfully.
+
+Phase 2: Build the profile manager and local storage layer.
+
+Phase 3: Implement the Question Bank with all required answer types and import/export.
+
+Phase 4: Build the field detector and reliable field-filling engine.
+
+Phase 5: Implement question matching and confidence handling.
+
+Phase 6: Implement Workday-specific adapters and custom controls.
+
+Phase 7: Build the multi-step session controller, route detection, and MutationObserver.
+
+Phase 8: Add the status panel, unanswered-question workflow, and review summary.
+
+Phase 9: Add automated tests, security checks, and error handling.
+
+Phase 10: Write complete setup and usage documentation.
+
+After each phase, run the relevant tests and fix errors before continuing.
+
+Do not leave placeholder buttons, nonfunctional UI controls, empty implementations, or hardcoded mock results in the finished product.
+
+## 12. Final Deliverables
+
+Provide:
+- Complete source code.
+- Working Manifest V3 configuration.
+- All required UI screens.
+- Functional profile and Question Bank storage.
+- Workday form detection and autofill logic.
+- Multi-step continuation logic.
+- Automated tests.
+- Sample Question Bank data.
+- A sample profile using clearly fictional information.
+- README with installation and usage instructions.
+- Troubleshooting guide.
+- Known limitations.
+- Privacy and permissions documentation.
+
+Start by presenting the implementation plan and proposed architecture, then implement the actual extension in the project workspace. Make reasonable engineering decisions without asking me to approve every minor detail. If a requirement depends on a Workday variant that cannot be inspected, implement a modular solution, document the uncertainty, and create a test fixture for it.
