@@ -13,12 +13,12 @@ import {
   Users,
 } from "lucide-react";
 import { AutofillSessionController } from "../content/session-controller";
-import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
+import { ProfileId } from "../shared/types";
 import { AutofillSession } from "../shared/types";
 
 interface WorkdaySimulatorViewProps {
-  activeProfileId?: PresetProfileId;
-  onSwitchProfile?: (presetId: PresetProfileId) => Promise<void>;
+  activeProfileId?: ProfileId;
+  onSwitchProfile?: (profileId: ProfileId) => Promise<void>;
   onSessionUpdate: (session: AutofillSession | null) => void;
   onOpenUnansweredTab: () => void;
   onOpenReviewTab: () => void;
@@ -42,6 +42,8 @@ export const WorkdaySimulatorView: React.FC<WorkdaySimulatorViewProps> = ({
   const [stepIndex, setStepIndex] = useState(0);
   const [session, setSession] = useState<AutofillSession | null>(null);
   const [formResetKey, setFormResetKey] = useState(0);
+  const [expCount, setExpCount] = useState(2);
+  const [eduCount, setEduCount] = useState(1);
   const formRootRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<AutofillSessionController | null>(null);
 
@@ -112,13 +114,21 @@ export const WorkdaySimulatorView: React.FC<WorkdaySimulatorViewProps> = ({
     setFormResetKey((k) => k + 1);
   };
 
-  const handleSwitchAndRefill = async (pid: PresetProfileId) => {
+  const handleSwitchAndRefill = async (pid: ProfileId) => {
     if (onSwitchProfile) {
       await onSwitchProfile(pid);
     }
     if (controllerRef.current) {
       await controllerRef.current.fillCurrentStep({ overwriteExisting: true });
     }
+  };
+
+  const handleAddExperience = () => {
+    setExpCount((c) => c + 1);
+  };
+
+  const handleAddEducation = () => {
+    setEduCount((c) => c + 1);
   };
 
   const results = session?.results || [];
@@ -230,28 +240,22 @@ export const WorkdaySimulatorView: React.FC<WorkdaySimulatorViewProps> = ({
               Active Resume Profile:
             </span>
             <span className="badge badge-blue">
-              {PRESET_PROFILES[activeProfileId].label} (
-              {PRESET_PROFILES[activeProfileId].profile.personal.fullName})
+              {activeProfileId || "default"}
             </span>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
-              const isSelected = activeProfileId === pid;
-              return (
-                <button
-                  key={pid}
-                  type="button"
-                  data-testid={`sim-switch-${pid}`}
-                  className={`btn btn-sm ${
-                    isSelected ? "btn-primary" : "btn-secondary"
-                  }`}
-                  onClick={() => void handleSwitchAndRefill(pid)}
-                >
-                  Use {PRESET_PROFILES[pid].label} (
-                  {PRESET_PROFILES[pid].profile.personal.firstName})
-                </button>
-              );
-            })}
+            {/* Profile switching handled via sidebar; profile list would come from getAllProfiles */}
+            <button
+              type="button"
+              className="btn btn-sm btn-secondary"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.location.hash = "profile";
+                }
+              }}
+            >
+              Manage Profiles
+            </button>
           </div>
         </div>
 
@@ -665,262 +669,238 @@ export const WorkdaySimulatorView: React.FC<WorkdaySimulatorViewProps> = ({
             My Experience
           </h3>
 
-          {/* Work Experience 1 */}
-          <div
-            data-automation-id="workExperienceSection"
-            style={{
-              border: "1px solid #e2e8f0",
-              borderRadius: 10,
-              padding: 16,
-              marginBottom: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <h4 style={{ margin: "0 0 12px" }}>Work Experience 1</h4>
-            <div className="grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp1-title">
-                  Job Title *
-                </label>
-                <input
-                  id="wd-exp1-title"
-                  name="jobTitle1"
-                  className="input"
-                  required
-                />
+          {/* Dynamic Work Experience Sections (with Add button) */}
+          {Array.from({ length: expCount }).map((_, i) => (
+            <div
+              key={`exp-${i}`}
+              data-automation-id="workExperienceSection"
+              data-section-index={i}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 10,
+                padding: 16,
+                marginBottom: 16,
+                background: "#f8fafc",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <h4 style={{ margin: "0 0 12px" }}>
+                  Work Experience {i + 1}
+                </h4>
+                {i === expCount - 1 && (
+                  <button
+                    type="button"
+                    onClick={handleAddExperience}
+                    className="btn btn-sm btn-secondary"
+                  >
+                    + Add Another Experience
+                  </button>
+                )}
               </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp1-company">
-                  Company *
-                </label>
-                <input
-                  id="wd-exp1-company"
-                  name="company1"
-                  className="input"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp1-loc">
-                  Location
-                </label>
-                <input id="wd-exp1-loc" name="location1" className="input" />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp1-from">
-                  From *
-                </label>
-                <input
-                  id="wd-exp1-from"
-                  name="startDate1"
-                  className="input"
-                  placeholder="MM/YYYY"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp1-to">
-                  To *
-                </label>
-                <input
-                  id="wd-exp1-to"
-                  name="endDate1"
-                  className="input"
-                  placeholder="MM/YYYY"
-                />
-              </div>
-              <div className="form-group" style={{ justifyContent: "center" }}>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    marginTop: 22,
-                    fontWeight: 600,
-                    fontSize: 13,
-                  }}
-                >
+              <div className="grid-3">
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-exp${i + 1}-title`}>
+                    Job Title *
+                  </label>
                   <input
-                    id="wd-exp1-current"
-                    type="checkbox"
-                    name="currentlyWorkHere1"
+                    id={`wd-exp${i + 1}-title`}
+                    name={`jobTitle${i + 1}`}
+                    className="input"
+                    required
                   />
-                  I currently work here
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-exp${i + 1}-company`}>
+                    Company *
+                  </label>
+                  <input
+                    id={`wd-exp${i + 1}-company`}
+                    name={`company${i + 1}`}
+                    className="input"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-exp${i + 1}-loc`}>
+                    Location
+                  </label>
+                  <input
+                    id={`wd-exp${i + 1}-loc`}
+                    name={`location${i + 1}`}
+                    className="input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-exp${i + 1}-from`}>
+                    From *
+                  </label>
+                  <input
+                    id={`wd-exp${i + 1}-from`}
+                    name={`startDate${i + 1}`}
+                    className="input"
+                    placeholder="MM/YYYY"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-exp${i + 1}-to`}>
+                    To *
+                  </label>
+                  <input
+                    id={`wd-exp${i + 1}-to`}
+                    name={`endDate${i + 1}`}
+                    className="input"
+                    placeholder="MM/YYYY"
+                  />
+                </div>
+                <div className="form-group" style={{ justifyContent: "center" }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginTop: 22,
+                      fontWeight: 600,
+                      fontSize: 13,
+                    }}
+                  >
+                    <input
+                      id={`wd-exp${i + 1}-current`}
+                      type="checkbox"
+                      name={`currentlyWorkHere${i + 1}`}
+                    />
+                    I currently work here
+                  </label>
+                </div>
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label" htmlFor={`wd-exp${i + 1}-desc`}>
+                  Role Description
                 </label>
+                <textarea
+                  id={`wd-exp${i + 1}-desc`}
+                  name={`roleDescription${i + 1}`}
+                  className="textarea"
+                />
               </div>
             </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="wd-exp1-desc">
-                Role Description
-              </label>
-              <textarea
-                id="wd-exp1-desc"
-                name="roleDescription1"
-                className="textarea"
-              />
-            </div>
-          </div>
+          ))}
 
-          {/* Work Experience 2 */}
-          <div
-            data-automation-id="workExperienceSection"
-            style={{
-              border: "1px solid #e2e8f0",
-              borderRadius: 10,
-              padding: 16,
-              marginBottom: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <h4 style={{ margin: "0 0 12px" }}>Work Experience 2</h4>
-            <div className="grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp2-title">
-                  Job Title *
-                </label>
-                <input
-                  id="wd-exp2-title"
-                  name="jobTitle2"
-                  className="input"
-                  required
-                />
+          {/* Dynamic Education Sections (with Add button) */}
+          {Array.from({ length: eduCount }).map((_, i) => (
+            <div
+              key={`edu-${i}`}
+              data-automation-id="educationSection"
+              data-section-index={i}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 10,
+                padding: 16,
+                marginBottom: 16,
+                background: "#f8fafc",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
+                <h4 style={{ margin: "0 0 12px" }}>
+                  Education {i + 1}
+                </h4>
+                {i === eduCount - 1 && (
+                  <button
+                    type="button"
+                    onClick={handleAddEducation}
+                    className="btn btn-sm btn-secondary"
+                  >
+                    + Add Another Education
+                  </button>
+                )}
               </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp2-company">
-                  Company *
-                </label>
-                <input
-                  id="wd-exp2-company"
-                  name="company2"
-                  className="input"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp2-loc">
-                  Location
-                </label>
-                <input id="wd-exp2-loc" name="location2" className="input" />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp2-from">
-                  From *
-                </label>
-                <input
-                  id="wd-exp2-from"
-                  name="startDate2"
-                  className="input"
-                  placeholder="MM/YYYY"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-exp2-to">
-                  To *
-                </label>
-                <input
-                  id="wd-exp2-to"
-                  name="endDate2"
-                  className="input"
-                  placeholder="MM/YYYY"
-                />
-              </div>
-            </div>
-            <div className="form-group" style={{ marginBottom: 0 }}>
-              <label className="form-label" htmlFor="wd-exp2-desc">
-                Role Description
-              </label>
-              <textarea
-                id="wd-exp2-desc"
-                name="roleDescription2"
-                className="textarea"
-              />
-            </div>
-          </div>
-
-          {/* Education 1 */}
-          <div
-            data-automation-id="educationSection"
-            style={{
-              border: "1px solid #e2e8f0",
-              borderRadius: 10,
-              padding: 16,
-              marginBottom: 16,
-              background: "#f8fafc",
-            }}
-          >
-            <h4 style={{ margin: "0 0 12px" }}>Education 1</h4>
-            <div className="grid-3">
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-school">
-                  School or University *
-                </label>
-                <input
-                  id="wd-edu1-school"
-                  name="school1"
-                  className="input"
-                  required
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-degree">
-                  Degree *
-                </label>
-                <select
-                  id="wd-edu1-degree"
-                  name="degree1"
-                  className="select"
-                  required
-                  defaultValue=""
-                >
-                  <option value="">Select One</option>
-                  <option value="Bachelor of Computer Applications (BCA)">
-                    Bachelor of Computer Applications (BCA)
-                  </option>
-                  <option value="Bachelor's Degree">
-                    Bachelor&apos;s Degree
-                  </option>
-                  <option value="Master's Degree">Master&apos;s Degree</option>
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-major">
-                  Field of Study
-                </label>
-                <input
-                  id="wd-edu1-major"
-                  name="fieldOfStudy1"
-                  className="input"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-gpa">
-                  Overall Result (GPA)
-                </label>
-                <input id="wd-edu1-gpa" name="gpa1" className="input" />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-from">
-                  From
-                </label>
-                <input
-                  id="wd-edu1-from"
-                  name="eduFrom1"
-                  className="input"
-                  placeholder="YYYY"
-                />
-              </div>
-              <div className="form-group">
-                <label className="form-label" htmlFor="wd-edu1-to">
-                  To (Actual or Expected)
-                </label>
-                <input
-                  id="wd-edu1-to"
-                  name="eduTo1"
-                  className="input"
-                  placeholder="YYYY"
-                />
+              <div className="grid-3">
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-school`}>
+                    School or University *
+                  </label>
+                  <input
+                    id={`wd-edu${i + 1}-school`}
+                    name={`school${i + 1}`}
+                    className="input"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-degree`}>
+                    Degree *
+                  </label>
+                  <select
+                    id={`wd-edu${i + 1}-degree`}
+                    name={`degree${i + 1}`}
+                    className="select"
+                    required
+                    defaultValue=""
+                  >
+                    <option value="">Select One</option>
+                    <option value="Bachelor of Computer Applications (BCA)">
+                      Bachelor of Computer Applications (BCA)
+                    </option>
+                    <option value="Bachelor's Degree">
+                      Bachelor&apos;s Degree
+                    </option>
+                    <option value="Master's Degree">Master&apos;s Degree</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-major`}>
+                    Field of Study
+                  </label>
+                  <input
+                    id={`wd-edu${i + 1}-major`}
+                    name={`fieldOfStudy${i + 1}`}
+                    className="input"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-gpa`}>
+                    Overall Result (GPA)
+                  </label>
+                  <input id={`wd-edu${i + 1}-gpa`} name={`gpa${i + 1}`} className="input" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-from`}>
+                    From
+                  </label>
+                  <input
+                    id={`wd-edu${i + 1}-from`}
+                    name={`eduFrom${i + 1}`}
+                    className="input"
+                    placeholder="YYYY"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" htmlFor={`wd-edu${i + 1}-to`}>
+                    To (Actual or Expected)
+                  </label>
+                  <input
+                    id={`wd-edu${i + 1}-to`}
+                    name={`eduTo${i + 1}`}
+                    className="input"
+                    placeholder="YYYY"
+                  />
+                </div>
               </div>
             </div>
-          </div>
+          ))}
 
           {/* Skills & Links */}
           <div className="grid-3">

@@ -78,6 +78,23 @@ if (typeof chrome !== "undefined" && chrome.runtime?.onMessage) {
             }
             const session = await controller.startAutofill({
               overwriteExisting: message.payload?.overwriteExisting,
+              aiFill: message.payload?.aiFill,
+            });
+            sendResponse({ ok: true, session });
+            return;
+          }
+
+          if (message.type === "AI_FILL_ALL") {
+            if (!statusPanel && settings.showFloatingStatusPanel) {
+              statusPanel = new FloatingStatusPanel(controller);
+              statusPanel.mount(document.body);
+            }
+            // Enable AI fallback for this session
+            const { saveSettings } = await import("../storage/settings-store");
+            await saveSettings({ enableAiFallback: true });
+            const session = await controller.startAutofill({
+              overwriteExisting: true,
+              aiFill: true,
             });
             sendResponse({ ok: true, session });
             return;

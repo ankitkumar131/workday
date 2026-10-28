@@ -13,8 +13,12 @@ import {
   getActiveSession,
   saveActiveSession,
 } from "../storage/session-store";
-import { getSettings } from "../storage/settings-store";
+import { getSettings, saveSettings } from "../storage/settings-store";
 import { detectFieldsInRoot } from "./field-detector";
+import {
+  SectionReplicator,
+  SectionReplicationOutcome,
+} from "./section-replicator";
 import { fillDetectedField, highlightFieldElement } from "./field-filler";
 import { DebouncedFormMutationObserver } from "./mutation-observer";
 import { SpaRouteObserver } from "./route-observer";
@@ -112,9 +116,16 @@ export class AutofillSessionController {
    */
   async startAutofill(options?: {
     overwriteExisting?: boolean;
+    aiFill?: boolean;
   }): Promise<AutofillSession> {
     const url = this.getUrl();
-    const settings = await getSettings();
+    let settings = await getSettings();
+
+    // If AI fill requested, enable AI fallback temporarily for this session
+    if (options?.aiFill && !settings.enableAiFallback) {
+      settings = await saveSettings({ enableAiFallback: true });
+    }
+
     const meta = inspectWorkdayPage(
       this.root,
       url,
@@ -261,19 +272,63 @@ export class AutofillSessionController {
         return;
       }
 
+      // --- Section Replication: ensure enough repeatable rows exist ---
+      if (settings.autoExpandRepeatableSections !== false) {
+        let outcome: SectionReplicationOutcome;
+        try {
+          const replicator = new SectionReplicator({
+            root: this.root as HTMLElement,
+            maxExpansions: settings.maxSectionExpansions ?? 10,
+          });
+          outcome = await replicator.ensureSectionsRendered(profile);
+        } catch {
+          // Non-fatal: continue with existing DOM sections
+          outcome = { navigatedAway: false };
+        }
+
+        // Abort if a section-expansion click navigated the page away
+        if (outcome.navigatedAway || this.getUrl() !== url) {
+          const errMsg =
+            "Autofill stopped: a section-expansion click navigated the page away.";
+          if (!this.session.errors.includes(errMsg)) {
+            this.session.errors.push(errMsg);
+          }
+          this.session.status = "cancelled";
+          await saveActiveSession(this.session);
+          this.notifyListeners();
+          return;
+        }
+      }
+
       const detectedFields = detectFieldsInRoot(this.root);
       const overwrite =
         options?.overwriteExisting ?? settings.overwriteExistingValues;
 
+      // Record the URL before filling to detect any unexpected navigation
+      const startingUrl = this.getUrl();
+
       for (const field of detectedFields) {
+        // Abort if the page navigated away during field processing
+        if (this.getUrl() !== startingUrl) {
+          const errMsg = "Page navigated away during autofill — stopping session to prevent data loss.";
+          if (!this.session.errors.includes(errMsg)) {
+            this.session.errors.push(errMsg);
+          }
+          this.session.status = "cancelled";
+          await saveActiveSession(this.session);
+          this.notifyListeners();
+          return;
+        }
+
         const stepId = this.session.currentStep || "Current Step";
 
-        // Evaluate match against Question Bank + Profile
-        const evaluation = evaluateFieldMatch(field, questions, profile, {
+        // Evaluate match against Question Bank + Profile (with AI fallback)
+        const evaluation = await evaluateFieldMatch(field, questions, profile, {
           confidenceThreshold: settings.confidenceThreshold,
           enableSemanticMatching: settings.enableSemanticAiMatching,
           requireConfirmationForSensitive:
             settings.requireConfirmationForSensitive,
+          enableAiFallback: settings.enableAiFallback,
         });
 
         let resultItem: FieldMatchResult;
@@ -292,6 +347,18 @@ export class AutofillSessionController {
                 !settings.requireConfirmationForDeclarations,
             }
           );
+
+          // Verify we haven't navigated away after filling
+          if (this.getUrl() !== startingUrl) {
+            const errMsg = "Page navigated away after filling a field — stopping session.";
+            if (!this.session.errors.includes(errMsg)) {
+              this.session.errors.push(errMsg);
+            }
+            this.session.status = "cancelled";
+            await saveActiveSession(this.session);
+            this.notifyListeners();
+            return;
+          }
 
           resultItem = {
             fieldFingerprint: field.fieldFingerprint,

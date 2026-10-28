@@ -16,7 +16,7 @@ import {
   Users,
   Wrench,
 } from "lucide-react";
-import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
+import { ProfileId } from "../shared/types";
 import {
   CertificationRecord,
   EducationRecord,
@@ -27,10 +27,15 @@ import {
 } from "../shared/types";
 import {
   calculateProfileCompletion,
+  createProfile,
+  deleteProfile,
+  getAllProfiles,
+  getActiveProfileId,
   loadSampleProfile,
   reorderItems,
   resetProfileToEmpty,
   saveProfile,
+  switchProfile,
 } from "../storage/profile-store";
 import {
   extractResumeTextFromFile,
@@ -39,8 +44,8 @@ import {
 
 interface ProfileManagerViewProps {
   profile: UserProfile;
-  activeProfileId?: PresetProfileId;
-  onSwitchProfile?: (presetId: PresetProfileId) => Promise<void>;
+  activeProfileId?: ProfileId;
+  onSwitchProfile?: (profileId: ProfileId) => Promise<void>;
   onProfileUpdated: (profile: UserProfile) => void;
 }
 
@@ -53,7 +58,7 @@ type ProfileSectionTab =
 
 export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
   profile,
-  activeProfileId = "ankit",
+  activeProfileId,
   onSwitchProfile,
   onProfileUpdated,
 }) => {
@@ -74,6 +79,11 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
   const [resumeDraft, setResumeDraft] = useState<ResumeParseDraft | null>(null);
   const [manualResumePaste, setManualResumePaste] = useState("");
   const [confirmClearModal, setConfirmClearModal] = useState(false);
+  const [allProfiles, setAllProfiles] = useState<Record<ProfileId, UserProfile>>({});
+
+  useEffect(() => {
+    void getAllProfiles().then(setAllProfiles);
+  }, []);
 
   const completion = calculateProfileCompletion(draft);
 
@@ -90,20 +100,20 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
     onProfileUpdated(result.profile);
     setStatusMessage({
       type: "success",
-      text: `Saved changes to ${PRESET_PROFILES[activeProfileId].label} (${result.profile.personal.fullName}).`,
+      text: `Saved changes to profile ${activeProfileId} (${result.profile.personal.fullName}).`,
     });
   };
 
-  const handleLoadSample = async (presetId: PresetProfileId = activeProfileId) => {
-    const sample = await loadSampleProfile(presetId);
+  const handleLoadSample = async () => {
+    const sample = await loadSampleProfile(activeProfileId);
     setDraft(sample);
     onProfileUpdated(sample);
-    if (onSwitchProfile) {
-      await onSwitchProfile(presetId);
+    if (onSwitchProfile && activeProfileId) {
+      await onSwitchProfile(activeProfileId);
     }
     setStatusMessage({
       type: "info",
-      text: `Restored ${PRESET_PROFILES[presetId].label} (${sample.personal.fullName}) from ATS Resume defaults.`,
+      text: `Loaded sample data into profile ${activeProfileId} (${sample.personal.fullName}).`,
     });
   };
 
@@ -396,32 +406,22 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
         <div className="card-header" style={{ marginBottom: 12 }}>
           <div>
             <h1 className="card-title" style={{ fontSize: 20 }}>
-              Profile Manager — {PRESET_PROFILES[activeProfileId].label}
+              Profile Manager — {activeProfileId || "My Profile"}
             </h1>
             <p className="card-subtitle">
-              Switch between your two hardcoded ATS resume profiles (
-              <strong>Profile Ankit</strong> &amp; <strong>Profile Aman</strong>
-              ) or customize any field below.
+              Manage your profiles — create, switch, rename, or delete as
+              needed. All data stored locally on your device.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
               type="button"
               className="btn btn-secondary"
-              onClick={() => void handleLoadSample("ankit")}
-              title="Reset & Activate Profile Ankit (Ankit_Kumar_Resume_ATS.pdf)"
+              onClick={handleLoadSample}
+              title="Load sample demo data into active profile"
             >
               <Sparkles size={15} />
-              Restore Profile Ankit
-            </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => void handleLoadSample("aman")}
-              title="Reset & Activate Profile Aman (Aman_Kumar_Resume_ATS.pdf)"
-            >
-              <Sparkles size={15} />
-              Restore Profile Aman
+              Load Sample Data
             </button>
             <button
               type="button"
@@ -443,7 +443,7 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
           </div>
         </div>
 
-        {/* Hardcoded Candidate Profiles Selector (Profile Ankit vs Profile Aman) */}
+        {/* Dynamic Profile Selector */}
         <div
           style={{
             display: "grid",
@@ -452,16 +452,16 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
             marginBottom: 14,
           }}
         >
-          {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
-            const isSelected = activeProfileId === pid;
-            const meta = PRESET_PROFILES[pid];
+          {Object.entries(allProfiles).map(([id, prof]) => {
+            const isSelected = activeProfileId === id;
+            const fullName = prof.personal.fullName || `${prof.personal.firstName} ${prof.personal.lastName}`.trim() || id;
             return (
               <div
-                key={pid}
-                data-testid={`profile-card-${pid}`}
+                key={id}
+                data-testid={`profile-card-${id}`}
                 onClick={() => {
                   if (onSwitchProfile) {
-                    void onSwitchProfile(pid);
+                    void onSwitchProfile(id);
                   }
                 }}
                 style={{
@@ -489,20 +489,19 @@ export const ProfileManagerView: React.FC<ProfileManagerViewProps> = ({
                     }}
                   >
                     <Users size={15} />
-                    {meta.label}: {meta.profile.personal.fullName}
+                    {fullName}
                   </div>
                   <div style={{ fontSize: 12, color: "#475569", marginTop: 2 }}>
-                    {meta.subtitle}
+                    {prof.personal.email || "No email"}
                   </div>
                   <div style={{ fontSize: 11.5, color: "#64748b", marginTop: 2 }}>
-                    {meta.email} • +91 {meta.profile.personal.phone} •{" "}
-                    {meta.profile.skillsAndDocs.resumeFileName}
+                    {prof.professional.currentJobTitle || "No title"}
                   </div>
                 </div>
                 <span
                   className={`badge ${isSelected ? "badge-blue" : "badge-gray"}`}
                 >
-                  {isSelected ? "ACTIVE" : "Click to Activate"}
+                  {isSelected ? "ACTIVE" : "Switch"}
                 </span>
               </div>
             );

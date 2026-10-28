@@ -2,14 +2,64 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { AutofillSessionController } from "../../src/content/session-controller";
 import { FloatingStatusPanel } from "../../src/content/status-panel";
 import { storageClearAll } from "../../src/storage/chrome-storage";
+import { saveProfile } from "../../src/storage/profile-store";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const testProfile = {
+  personal: {
+    firstName: "Ankit",
+    middleName: "",
+    lastName: "Kumar",
+    preferredName: "Ankit",
+    email: "ankit.kumar.career9@gmail.com",
+    phoneCountryCode: "+91",
+    phone: "8308477769",
+    addressLine1: "Lohegaon, Pune",
+    addressLine2: "",
+    city: "Pune",
+    state: "Maharashtra",
+    postalCode: "411047",
+    country: "India",
+    linkedInUrl: "",
+    githubUrl: "",
+    portfolioUrl: "",
+  },
+  professional: {
+    summary: "",
+    currentJobTitle: "",
+    previousJobTitle: "",
+    currentEmployer: "",
+    previousEmployers: [],
+    totalYearsExperience: "",
+    noticePeriod: "",
+    currentSalary: "",
+    expectedSalary: "",
+    preferredWorkLocation: "",
+    willingToRelocate: true,
+    employmentTypePreference: "Full-time",
+  },
+  education: [],
+  employment: [],
+  skillsAndDocs: {
+    technicalSkills: [],
+    softSkills: [],
+    certifications: [],
+    projects: [],
+    resumeFileName: "",
+    resumeExtractedText: "",
+    coverLetterText: "",
+    otherInformation: "",
+  },
+  updatedAt: Date.now(),
+};
+
 describe("Phase 9: Reliability, Session Recovery & Floating Status Panel", () => {
   beforeEach(async () => {
     await storageClearAll();
+    await saveProfile(testProfile as any);
   });
 
   it("mounts FloatingStatusPanel, escapes XSS in step labels, and ignores panel DOM mutations", async () => {

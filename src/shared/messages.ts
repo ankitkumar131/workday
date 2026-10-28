@@ -16,7 +16,9 @@ export type ExtensionMessageType =
   | "SESSION_UPDATED"
   | "ANSWER_UNANSWERED_QUESTION"
   | "OPEN_DASHBOARD_TAB"
-  | "PING_CONTENT_SCRIPT";
+  | "PING_CONTENT_SCRIPT"
+  | "ENSURE_CONTENT_SCRIPT"
+  | "AI_FILL_ALL";
 
 export interface ExtensionMessage {
   type: ExtensionMessageType;
@@ -31,12 +33,14 @@ export interface ExtensionMessage {
     category?: string;
     session?: AutofillSession | null;
     overwriteExisting?: boolean;
+    aiFill?: boolean;
   };
 }
 
 export interface ExtensionMessageResponse {
   ok: boolean;
   isSupportedPage?: boolean;
+  injected?: boolean;
   session?: AutofillSession | null;
   results?: FieldMatchResult[];
   unanswered?: UnansweredQuestionItem[];

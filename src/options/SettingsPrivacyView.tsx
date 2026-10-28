@@ -15,7 +15,13 @@ import {
   UserProfile,
 } from "../shared/types";
 import { storageClearAll } from "../storage/chrome-storage";
-import { getProfile, saveProfile } from "../storage/profile-store";
+import {
+  getProfile,
+  saveProfile,
+  downloadProfileAsJson,
+  parseProfileJsonFile,
+  importProfile,
+} from "../storage/profile-store";
 import {
   getQuestions,
   importQuestionsFromContent,
@@ -46,6 +52,11 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
     type: "success" | "danger" | "warning" | "info";
     text: string;
   } | null>(null);
+  const [profileFile, setProfileFile] = useState<File | null>(null);
+  const [importStatus, setImportStatus] = useState<{
+    type: "success" | "danger" | "info";
+    text: string;
+  } | null>(null);
 
   const handleSaveSettings = async () => {
     const updated = await saveSettings(draft);
@@ -57,6 +68,46 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
     });
   };
 
+  // --- Profile Export / Import ---
+
+  const handleExportProfile = async () => {
+    const url = await downloadProfileAsJson(true, true);
+    if (!url) {
+      setBanner({ type: "danger", text: "Failed to export profile." });
+    }
+  };
+
+  const handleProfileFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null;
+    setProfileFile(file);
+  };
+
+  const handleImportProfile = async () => {
+    if (!profileFile) {
+      setImportStatus({ type: "danger", text: "Please select a JSON file first." });
+      return;
+    }
+
+    const parsed = await parseProfileJsonFile(profileFile);
+    if (!parsed.ok || !parsed.data) {
+      setImportStatus({ type: "danger", text: parsed.error || "Invalid profile file." });
+      setProfileFile(null);
+      return;
+    }
+
+    const result = await importProfile(parsed.data);
+    if (!result.ok) {
+      setImportStatus({ type: "danger", text: result.errors?.join(" ") || "Import failed." });
+      setProfileFile(null);
+      return;
+    }
+
+    setImportStatus({ type: "success", text: "Profile imported successfully." });
+    setProfileFile(null);
+    await onFullDataReload();
+    setBanner({ type: "success", text: "Profile imported and reloaded." });
+  };
+
   const handleAddHost = async () => {
     const val = newHostInput.trim().toLowerCase();
     if (!val) return;
@@ -65,6 +116,61 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
       setDraft({ ...draft, customWorkdayHosts: nextHosts });
     }
     setNewHostInput("");
+  };
+
+  const handleGrantBrowserAccess = () => {
+    if (typeof chrome === "undefined" || !chrome.permissions?.request) {
+      setBanner({
+        type: "danger",
+        text: "Browser permissions are unavailable in this context.",
+      });
+      return;
+    }
+    const origins = draft.customWorkdayHosts
+      .map((entry) => {
+        const clean = entry
+          .trim()
+          .toLowerCase()
+          .replace(/^https?:\/\//, "")
+          .replace(/\/.*$/, "");
+        const scheme = entry.trim().toLowerCase().startsWith("http://")
+          ? "http"
+          : "https";
+        return clean ? `${scheme}://${clean}/*` : "";
+      })
+      .filter(Boolean);
+    if (origins.length === 0) {
+      setBanner({
+        type: "warning",
+        text: "Add at least one custom domain before granting browser access.",
+      });
+      return;
+    }
+    // chrome.permissions.request must be called synchronously inside the
+    // click handler — awaiting anything first would void the user gesture.
+    try {
+      chrome.permissions.request({ origins }, (granted) => {
+        if (chrome.runtime.lastError) {
+          setBanner({
+            type: "danger",
+            text:
+              chrome.runtime.lastError.message || "Permission request failed.",
+          });
+          return;
+        }
+        setBanner({
+          type: granted ? "success" : "warning",
+          text: granted
+            ? "Browser access granted — the autofill engine can now activate on your custom domains."
+            : "Browser access was not granted. Custom domains will stay inactive until granted.",
+        });
+      });
+    } catch (err) {
+      setBanner({
+        type: "danger",
+        text: err instanceof Error ? err.message : "Permission request failed.",
+      });
+    }
   };
 
   const handleExportFullBackup = () => {
@@ -410,6 +516,255 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
         </div>
       </div>
 
+      {/* AI Fallback Configuration (Multi-Provider with Fallback Chaining) */}
+      <div className="card" style={{ borderLeft: "4px solid #8b5cf6" }}>
+        <h2 className="card-title" style={{ marginBottom: 14 }}>
+          <Lock size={18} style={{ verticalAlign: "middle", marginRight: 6 }} />
+          AI Fallback — Multi-Provider
+        </h2>
+        <p className="card-subtitle" style={{ marginBottom: 14 }}>
+          When a question has no local match, the extension asks AI providers
+          in order until one returns an answer. Providers are tried with
+          automatic fallback. Disabled by default — no data is sent unless you
+          explicitly enable it.
+        </p>
+
+        <label
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+            cursor: "pointer",
+            marginBottom: 14,
+          }}
+        >
+          <input
+            type="checkbox"
+            style={{ marginTop: 4 }}
+            checked={draft.enableAiFallback}
+            onChange={(e) =>
+              setDraft({ ...draft, enableAiFallback: e.target.checked })
+            }
+          />
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              Enable AI Fallback for Unanswered Questions
+            </div>
+            <div style={{ fontSize: 12.5, color: "#64748b" }}>
+              Sends question text + non-sensitive profile fields to configured
+              AI providers. Never sends passwords, IDs, or legal declarations.
+            </div>
+          </div>
+        </label>
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontWeight: 600, fontSize: 13, color: "#475569", marginBottom: 8 }}>
+            Provider Chain (tried in order)
+          </div>
+          {[
+            {
+              key: "aiPrimaryProvider",
+              label: "Primary Provider",
+              endpointKey: "aiPrimaryEndpoint",
+              apiKeyKey: "aiPrimaryApiKey",
+              modelKey: "aiPrimaryModel",
+              enabledKey: "aiPrimaryEnabled",
+            },
+            {
+              key: "aiFallback1Provider",
+              label: "Fallback 1",
+              endpointKey: "aiFallback1Endpoint",
+              apiKeyKey: "aiFallback1ApiKey",
+              modelKey: "aiFallback1Model",
+              enabledKey: "aiFallback1Enabled",
+            },
+            {
+              key: "aiFallback2Provider",
+              label: "Fallback 2",
+              endpointKey: "aiFallback2Endpoint",
+              apiKeyKey: "aiFallback2ApiKey",
+              modelKey: "aiFallback2Model",
+              enabledKey: "aiFallback2Enabled",
+            },
+            {
+              key: "aiFallback3Provider",
+              label: "Fallback 3",
+              endpointKey: "aiFallback3Endpoint",
+              apiKeyKey: "aiFallback3ApiKey",
+              modelKey: "aiFallback3Model",
+              enabledKey: "aiFallback3Enabled",
+            },
+          ].map((provider, idx) => {
+            const pKey = provider.key as keyof ExtensionSettings;
+            const pEndpoint = provider.endpointKey as keyof ExtensionSettings;
+            const pApiKey = provider.apiKeyKey as keyof ExtensionSettings;
+            const pModel = provider.modelKey as keyof ExtensionSettings;
+            const pEnabled = provider.enabledKey as keyof ExtensionSettings;
+            return (
+              <div
+                key={provider.key}
+                style={{
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 8,
+                  padding: 10,
+                  marginBottom: 8,
+                  background: "#f8fafc",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", margin: 0 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(draft[pEnabled])}
+                      onChange={(e) =>
+                        setDraft({ ...draft, [pEnabled]: e.target.checked })
+                    }
+                  />
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>
+                    {provider.label}
+                  </span>
+                  <span style={{ fontSize: 11, color: "#64748b", fontStyle: "italic" }}>
+                    {draft[pEnabled] ? "Enabled" : "Disabled"}
+                  </span>
+                </label>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "#94a3b8" }}>
+                  Provider {idx + 1}
+                </span>
+              </div>
+              {draft[pEnabled] && (
+                <div className="grid-3" style={{ gap: 8 }}>
+                  <div className="form-group">
+                    <label className="form-label">Provider Type</label>
+                    <select
+                      className="select"
+                      value={draft[pKey] as string}
+                      onChange={(e) =>
+                        setDraft({ ...draft, [pKey]: e.target.value })
+                      }
+                    >
+                      <option value="openai">OpenAI</option>
+                      <option value="anthropic">Anthropic Claude</option>
+                      <option value="gemini">Google Gemini</option>
+                      <option value="openrouter">OpenRouter</option>
+                      <option value="custom">Custom Endpoint</option>
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">API Endpoint</label>
+                    <input
+                      className="input"
+                      value={draft[pEndpoint] as string}
+                      placeholder="Endpoint URL"
+                      onChange={(e) =>
+                        setDraft({ ...draft, [pEndpoint]: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">API Key</label>
+                    <input
+                      className="input"
+                      type="password"
+                      value={draft[pApiKey] as string}
+                      placeholder="sk-..."
+                      onChange={(e) =>
+                        setDraft({ ...draft, [pApiKey]: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Model</label>
+                    <input
+                      className="input"
+                      value={draft[pModel] as string}
+                      placeholder="gpt-3.5-turbo"
+                      onChange={(e) =>
+                        setDraft({ ...draft, [pModel]: e.target.value })
+                      }
+                    />
+                  </div>
+                </div>
+              )}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="grid-3" style={{ gap: 16, marginBottom: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Max Tokens</label>
+            <input
+              className="input"
+              type="number"
+              value={draft.aiMaxTokens}
+              onChange={(e) =>
+                setDraft({ ...draft, aiMaxTokens: Number(e.target.value) })
+              }
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Temperature</label>
+            <input
+              className="input"
+              type="number"
+              step="0.1"
+              value={draft.aiTemperature}
+              onChange={(e) =>
+                setDraft({ ...draft, aiTemperature: Number(e.target.value) })
+              }
+            />
+          </div>
+          <div className="form-group" style={{ display: "flex", alignItems: "end" }}>
+            <span style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+              Chaining stops at first valid answer
+            </span>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, color: "#64748b" }}>
+          <strong>Privacy:</strong> AI fallback is opt-in. Your API keys are
+          stored locally in chrome.storage.local. Only non-sensitive profile
+          fields (name, email, job title, education, skills) are included in
+          the prompt. Legal declarations are always excluded.
+        </div>
+
+        <div style={{ marginTop: 10, padding: 8, background: "#f8fafc", borderRadius: 6, border: "1px solid #e2e8f0" }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: "#475569", marginBottom: 6 }}>
+            AI Provider Configuration (Included in Exports)
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11 }}>
+              Primary:{" "}
+              <span style={{ color: draft.aiPrimaryEnabled ? "#16a34a" : "#64748b" }}>
+                {draft.aiPrimaryEnabled ? draft.aiPrimaryProvider : "Disabled"}
+              </span>{" "}
+              ({draft.aiPrimaryModel || "—"})
+            </span>
+            <span style={{ fontSize: 11 }}>
+              Fallback 1:{" "}
+              <span style={{ color: draft.aiFallback1Enabled ? "#16a34a" : "#64748b" }}>
+                {draft.aiFallback1Enabled ? draft.aiFallback1Provider : "Disabled"}
+              </span>{" "}
+              ({draft.aiFallback1Model || "—"})
+            </span>
+            <span style={{ fontSize: 11 }}>
+              Fallback 2:{" "}
+              <span style={{ color: draft.aiFallback2Enabled ? "#16a34a" : "#64748b" }}>
+                {draft.aiFallback2Enabled ? draft.aiFallback2Provider : "Disabled"}
+              </span>{" "}
+              ({draft.aiFallback2Model || "—"})
+            </span>
+            <span style={{ fontSize: 11 }}>
+              Fallback 3:{" "}
+              <span style={{ color: draft.aiFallback3Enabled ? "#16a34a" : "#64748b" }}>
+                {draft.aiFallback3Enabled ? draft.aiFallback3Provider : "Disabled"}
+              </span>{" "}
+              ({draft.aiFallback3Model || "—"})
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Website Permissions & Custom Workday Domains */}
       <div className="card">
         <h2 className="card-title" style={{ marginBottom: 6 }}>
@@ -467,6 +822,97 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
             </span>
           ))}
         </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: 10,
+            alignItems: "center",
+            marginTop: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleGrantBrowserAccess}
+            disabled={draft.customWorkdayHosts.length === 0}
+          >
+            <ShieldCheck size={15} />
+            Grant Browser Access
+          </button>
+          <span style={{ fontSize: 12, color: "#64748b" }}>
+            Grants Chrome permission for the domains listed above so the
+            autofill engine can activate on them automatically.
+          </span>
+        </div>
+      </div>
+
+      {/* Profile Export / Import (Individual Profiles: Ankit, Aman, Custom) */}
+      <div className="card" style={{ borderLeft: "4px solid #2563eb" }}>
+        <h2 className="card-title" style={{ marginBottom: 6 }}>
+          <Download size={18} style={{ verticalAlign: "middle", marginRight: 6 }} />
+          Profile Export / Import
+        </h2>
+        <p className="card-subtitle" style={{ marginBottom: 14 }}>
+          Export your active profile as a JSON file to back it up or move it
+          between browsers. When exported with settings, your AI provider
+          configuration (endpoints, API keys, models, fallback chain) is also
+          included.
+        </p>
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleExportProfile}
+          >
+            <Download size={15} />
+            Export Active Profile (JSON)
+          </button>
+          <label
+            className="btn btn-secondary"
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+          >
+            <Upload size={15} />
+            Import Profile (JSON)
+            <input
+              type="file"
+              accept=".json"
+              style={{ display: "none" }}
+              onChange={handleProfileFileChange}
+            />
+          </label>
+          {profileFile && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleImportProfile}
+              style={{ marginLeft: 0 }}
+            >
+              <Save size={15} />
+              Import "{profileFile.name}"
+            </button>
+          )}
+        </div>
+
+        {importStatus && (
+          <div
+            className={`alert alert-${importStatus.type === "success" ? "success" : importStatus.type === "danger" ? "danger" : "info"}`}
+          >
+            <span>{importStatus.text}</span>
+          </div>
+        )}
+
+        <div style={{ fontSize: 12, color: "#64748b" }}>
+          <strong>Included in export:</strong> Profile data, Question Bank,
+          Settings & AI provider configuration (API endpoints, API keys, models,
+          provider types, enabled flags, fallback chain).
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+          <strong>Tip:</strong> Export your profile separately so you can restore
+          your candidate profile and AI settings on any browser.
+        </div>
       </div>
 
       {/* Backup, Export, Import & Clear Data */}
@@ -476,7 +922,8 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
         </h2>
         <p className="card-subtitle" style={{ marginBottom: 14 }}>
           Export a complete JSON archive of your Profile, Question Bank, and
-          Settings, or wipe all local extension data.
+          Settings &mdash; including all AI provider configuration (API
+          endpoints, API keys, models, provider types, fallback chain).
         </p>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -506,6 +953,18 @@ export const SettingsPrivacyView: React.FC<SettingsPrivacyViewProps> = ({
             <Trash2 size={15} />
             Clear All Stored Data
           </button>
+        </div>
+
+        <div style={{ fontSize: 12, color: "#64748b", marginTop: 8 }}>
+          <strong>Included in full backup:</strong> Profile data, Question Bank,
+          Extension Settings, AI provider configuration (all 4 provider slots:
+          endpoint, API key, model, enabled flag), Auto-expand sections,
+          Confidence threshold, Website permissions, and all other extension
+          settings.
+        </div>
+        <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>
+          <strong>Restore:</strong> Importing a full backup replaces all local
+          data with the backed-up data, including your AI provider settings.
         </div>
 
         {confirmClearAll && (

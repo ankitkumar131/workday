@@ -236,6 +236,17 @@ export interface AutofillSession {
   updatedAt: number;
 }
 
+export type ProfileId = string;
+export type AIProviderType = "openai" | "anthropic" | "gemini" | "openrouter" | "custom";
+
+export interface PresetProfileMeta {
+  id: ProfileId;
+  label: string;
+  subtitle: string;
+  email: string;
+  profile: UserProfile;
+}
+
 export interface ExtensionSettings {
   autoContinueMultiStep: boolean;
   overwriteExistingValues: boolean;
@@ -247,7 +258,55 @@ export interface ExtensionSettings {
   enableSemanticAiMatching: boolean;
   aiConsentGranted: boolean;
   customWorkdayHosts: string[];
+  // AI fallback configuration - Multi-provider with chaining
+  enableAiFallback: boolean;
+  aiPrimaryProvider: AIProviderType;
+  aiPrimaryEndpoint: string;
+  aiPrimaryApiKey: string;
+  aiPrimaryModel: string;
+  aiPrimaryEnabled: boolean;
+  aiFallback1Provider: AIProviderType;
+  aiFallback1Endpoint: string;
+  aiFallback1ApiKey: string;
+  aiFallback1Model: string;
+  aiFallback1Enabled: boolean;
+  aiFallback2Provider: AIProviderType;
+  aiFallback2Endpoint: string;
+  aiFallback2ApiKey: string;
+  aiFallback2Model: string;
+  aiFallback2Enabled: boolean;
+  aiFallback3Provider: AIProviderType;
+  aiFallback3Endpoint: string;
+  aiFallback3ApiKey: string;
+  aiFallback3Model: string;
+  aiFallback3Enabled: boolean;
+  aiMaxTokens: number;
+  aiTemperature: number;
+  // Legacy single-provider fields (backward compatibility)
+  aiApiEndpoint: string;
+  aiApiKey: string;
+  aiModel: string;
+  autoExpandRepeatableSections: boolean;
+  maxSectionExpansions: number;
   updatedAt: number;
+}
+
+export interface ProfileExportData {
+  schemaVersion: number;
+  exportedAt: string;
+  profile: UserProfile;
+  profileId?: ProfileId;
+  questions?: QuestionAnswer[];
+  settings?: ExtensionSettings;
+}
+
+export interface FullExtensionExport {
+  schemaVersion: number;
+  exportedAt: string;
+  profile: UserProfile;
+  profileId: ProfileId;
+  questions: QuestionAnswer[];
+  settings: ExtensionSettings;
 }
 
 export interface ResumeParseDraft {

@@ -110,8 +110,45 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
     "*.myworkdaysite.com",
     "*.workday.com",
   ],
+  // AI fallback defaults (disabled by default, opt-in only)
+  enableAiFallback: false,
+  aiPrimaryProvider: "openai",
+  aiPrimaryEndpoint: "",
+  aiPrimaryApiKey: "",
+  aiPrimaryModel: "gpt-3.5-turbo",
+  aiPrimaryEnabled: false,
+  // Legacy single-provider fields (backward compatibility)
+  aiApiEndpoint: "",
+  aiApiKey: "",
+  aiModel: "gpt-3.5-turbo",
+  aiFallback1Provider: "anthropic",
+  aiFallback1Endpoint: "",
+  aiFallback1ApiKey: "",
+  aiFallback1Model: "claude-3-haiku-20240307",
+  aiFallback1Enabled: false,
+  aiFallback2Provider: "gemini",
+  aiFallback2Endpoint: "",
+  aiFallback2ApiKey: "",
+  aiFallback2Model: "gemini-1.5-flash",
+  aiFallback2Enabled: false,
+  aiFallback3Provider: "openrouter",
+  aiFallback3Endpoint: "",
+  aiFallback3ApiKey: "",
+  aiFallback3Model: "openrouter/auto",
+  aiFallback3Enabled: false,
+  aiMaxTokens: 500,
+  aiTemperature: 0.3,
+  autoExpandRepeatableSections: true,
+  maxSectionExpansions: 10,
   updatedAt: Date.now(),
 };
+
+export const PROFILE_EXPORT_STORAGE_KEY = "wsa_profile_exports_v2";
+export const ALL_PROFILES_STORAGE_KEY = "wsa_all_profiles_v2";
+export const FULL_EXTENSION_EXPORT_KEY = "wsa_full_extension_export_v2";
+
+// Default empty profile when no custom profile exists
+export const DEFAULT_PROFILE_ID = "default";
 
 export const EMPTY_PROFILE: UserProfile = {
   personal: {

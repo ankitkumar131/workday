@@ -15,7 +15,7 @@ export interface WorkdayTenantAdapter {
   prepareCustomControls(root: Document | HTMLElement): void;
 }
 
-function hostMatchesPattern(hostname: string, pattern: string): boolean {
+export function hostMatchesPattern(hostname: string, pattern: string): boolean {
   const cleanPattern = pattern.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   if (!cleanPattern) return false;
   if (cleanPattern.startsWith("*.")) {

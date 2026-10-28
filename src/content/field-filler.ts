@@ -288,7 +288,36 @@ function waitMs(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function isSafeToClick(el: HTMLElement): boolean {
+  // Never click anchor tags or elements with href attributes (prevents navigation)
+  if (el.tagName?.toLowerCase() === "a") return false;
+  if (el.getAttribute("href")) return false;
+
+  // Only click within form field containers or option elements
+  const tag = el.tagName?.toLowerCase();
+  const role = el.getAttribute("role");
+  const type = el.getAttribute("type");
+
+  // Safe: actual form controls
+  if (tag === "input" || tag === "textarea" || tag === "select" || tag === "button") return true;
+
+  // Safe: ARIA option elements within listboxes
+  if (role === "option" || role === "radio" || role === "checkbox") return true;
+
+  // Safe: elements explicitly marked as dropdown options
+  if (el.getAttribute("data-option-value") || el.getAttribute("data-automation-id")?.includes("option"))
+    return true;
+
+  // Not safe: anything else (divs, spans, links, etc.)
+  return false;
+}
+
 function triggerRealisticClick(el: HTMLElement): void {
+  if (!isSafeToClick(el)) {
+    console.warn("[WSA] Refusing to click unsafe element:", el.tagName, el.getAttribute("href"), el.textContent?.slice(0, 50));
+    return;
+  }
+
   el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
   el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
   el.click();
@@ -634,30 +663,48 @@ async function performSingleFillAttempt(
       }
 
       if (matchedNode) {
-        const chosenText =
-          matchedNode.getAttribute("data-option-value") ||
-          matchedNode.getAttribute("data-automation-label") ||
-          matchedNode.textContent?.trim() ||
-          targetStr;
+        // Safety: only click nodes within the field's own container, never global page elements
+        const fieldContainer =
+          el.closest(
+            '[data-automation-id^="formField"], .form-group, .wsa-combobox-wrapper, [role="listbox"]'
+          ) || el;
+        const isWithinContainer =
+          fieldContainer === matchedNode ||
+          fieldContainer.contains(matchedNode) ||
+          matchedNode.contains(fieldContainer);
 
-        triggerRealisticClick(matchedNode);
-        el.setAttribute("data-selected-value", chosenText);
-        if (el instanceof HTMLInputElement) {
-          setNativeControlValue(el, chosenText);
-          dispatchInputEvents(el, chosenText);
+        if (!isWithinContainer) {
+          console.warn(
+            "[WSA] Refusing to click option outside field container:",
+            matchedNode.tagName,
+            matchedNode.textContent?.slice(0, 50)
+          );
         } else {
-          if (el.hasAttribute("data-wsa-combobox-button")) {
-            el.textContent = chosenText;
-          }
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-        }
+          const chosenText =
+            matchedNode.getAttribute("data-option-value") ||
+            matchedNode.getAttribute("data-automation-label") ||
+            matchedNode.textContent?.trim() ||
+            targetStr;
 
-        const verifiedVal =
-          el instanceof HTMLInputElement
-            ? el.value
-            : el.getAttribute("data-selected-value") || el.textContent?.trim();
-        if (verifiedVal && matchChoiceText(verifiedVal, chosenText)) {
-          return { verified: true, appliedValue: chosenText };
+          triggerRealisticClick(matchedNode);
+          el.setAttribute("data-selected-value", chosenText);
+          if (el instanceof HTMLInputElement) {
+            setNativeControlValue(el, chosenText);
+            dispatchInputEvents(el, chosenText);
+          } else {
+            if (el.hasAttribute("data-wsa-combobox-button")) {
+              el.textContent = chosenText;
+            }
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+
+          const verifiedVal =
+            el instanceof HTMLInputElement
+              ? el.value
+              : el.getAttribute("data-selected-value") || el.textContent?.trim();
+          if (verifiedVal && matchChoiceText(verifiedVal, chosenText)) {
+            return { verified: true, appliedValue: chosenText };
+          }
         }
       }
     }

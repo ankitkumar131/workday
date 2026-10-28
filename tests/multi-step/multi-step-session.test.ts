@@ -1,19 +1,113 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { AutofillSessionController } from "../../src/content/session-controller";
 import { storageClearAll } from "../../src/storage/chrome-storage";
-import { switchPresetProfile } from "../../src/storage/profile-store";
+import {
+  createProfile,
+  getProfile,
+  saveProfile,
+  switchProfile,
+} from "../../src/storage/profile-store";
 import { getQuestions } from "../../src/storage/question-store";
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+const testProfile = {
+  personal: {
+    firstName: "Ankit",
+    middleName: "",
+    lastName: "Kumar",
+    preferredName: "Ankit",
+    email: "ankit.kumar.career9@gmail.com",
+    phoneCountryCode: "+91",
+    phone: "8308477769",
+    addressLine1: "Lohegaon, Pune",
+    addressLine2: "",
+    city: "Pune",
+    state: "Maharashtra",
+    postalCode: "411047",
+    country: "India",
+    linkedInUrl: "https://www.linkedin.com/in/ankit-kumar-510387270",
+    githubUrl: "https://github.com/ankitkumar131",
+    portfolioUrl: "https://github.com/ankitkumar131",
+  },
+  professional: {
+    summary: "Test summary",
+    currentJobTitle: "Software Developer",
+    previousJobTitle: "",
+    currentEmployer: "Scalar TechHub",
+    previousEmployers: ["Scalar TechHub", "MobiCloud Technologies"],
+    totalYearsExperience: "1.5",
+    noticePeriod: "Immediate / 15 days",
+    currentSalary: "",
+    expectedSalary: "800000",
+    preferredWorkLocation: "Pune, Maharashtra, India",
+    willingToRelocate: true,
+    employmentTypePreference: "Full-time",
+  },
+  education: [
+    {
+      id: "edu-1",
+      degree: "Bachelor of Computer Applications (BCA)",
+      fieldOfStudy: "Cloud Technology",
+      institution: "Ajeenkya DY Patil University, Pune",
+      startDate: "2022-06",
+      graduationDate: "2025-07",
+      gpa: "9.13",
+      location: "Pune, Maharashtra",
+    },
+  ],
+  employment: [
+    {
+      id: "emp-1",
+      employerName: "Scalar TechHub",
+      jobTitle: "Software Developer — Angular / MEAN Stack",
+      employmentType: "Full-time",
+      location: "Pune, Maharashtra",
+      startDate: "2025-09",
+      endDate: "2026-02",
+      currentlyEmployed: false,
+      responsibilities: "Test responsibilities",
+      achievements: "Test achievements",
+      skillsUsed: ["Angular", "TypeScript"],
+    },
+    {
+      id: "emp-2",
+      employerName: "MobiCloud Technologies",
+      jobTitle: "MEAN Stack Developer",
+      employmentType: "Full-time",
+      location: "Pune, Maharashtra",
+      startDate: "2024-07",
+      endDate: "2025-03",
+      currentlyEmployed: false,
+      responsibilities: "Test responsibilities",
+      achievements: "Test achievements",
+      skillsUsed: ["Angular", "Node.js"],
+    },
+  ],
+  skillsAndDocs: {
+    technicalSkills: ["Angular", "TypeScript", "JavaScript", "Node.js", "Python", "Java"],
+    softSkills: [],
+    certifications: [],
+    projects: [],
+    resumeFileName: "",
+    resumeExtractedText: "",
+    coverLetterText: "",
+    otherInformation: "",
+  },
+  updatedAt: Date.now(),
+};
+
 describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller", () => {
   beforeEach(async () => {
     await storageClearAll();
+    // Seed test profile data
+    await saveProfile(testProfile as any);
+    await switchProfile("default");
   });
 
-  it("fills Step 1 with Profile Ankit, automatically detects and fills Step 2 on DOM mutation (same URL), captures unanswered questions, and stops on Final Review Step", async () => {
+  it("fills Step 1 with profile data, automatically detects and fills Step 2 on DOM mutation (same URL), captures unanswered questions, and stops on Final Review Step", async () => {
     const appRoot = document.createElement("div");
     appRoot.setAttribute("data-automation-id", "applyFlowPage");
     document.body.appendChild(appRoot);
@@ -199,7 +293,7 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     appRoot.remove();
   });
 
-  it("autofills real Deutsche Bank Workday sections (Work Experience 1 & 2, Education 1 with GPA, AI Consent, Voluntary Disclosures) for both Profile Ankit and Profile Aman", async () => {
+  it("autofills real Deutsche Bank Workday sections (Work Experience 1 & 2, Education 1 with GPA, AI Consent, Voluntary Disclosures)", async () => {
     const appRoot = document.createElement("div");
     document.body.appendChild(appRoot);
 
@@ -274,16 +368,6 @@ describe("Phase 7: Automatic Multi-Step Form Continuation & Session Controller",
     );
     expect((document.getElementById("dbTerms") as HTMLInputElement).checked).toBe(
       true
-    );
-
-    // Switch to Profile Aman and refill
-    await switchPresetProfile("aman");
-    await controller.fillCurrentStep({ overwriteExisting: true });
-    expect((document.getElementById("eduGpa") as HTMLInputElement).value).toBe(
-      "8.93"
-    );
-    expect((document.getElementById("exp1Title") as HTMLInputElement).value).toBe(
-      "MEAN Stack Developer"
     );
 
     controller.stopObservers();

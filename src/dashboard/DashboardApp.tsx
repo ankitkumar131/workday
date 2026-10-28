@@ -8,11 +8,13 @@ import {
   Settings,
   UserCheck,
   Users,
+  Trash2,
+  Plus,
 } from "lucide-react";
 import { SettingsPrivacyView } from "../options/SettingsPrivacyView";
 import { QuestionBankView } from "../question-bank/QuestionBankView";
 import { DEFAULT_SETTINGS, EMPTY_PROFILE } from "../shared/constants";
-import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
+import { ProfileId } from "../shared/types";
 import {
   AnswerType,
   AutofillSession,
@@ -22,9 +24,13 @@ import {
 } from "../shared/types";
 import {
   calculateProfileCompletion,
+  createProfile,
+  deleteProfile,
   getActiveProfileId,
+  getAllProfiles,
   getProfile,
-  switchPresetProfile,
+  renameProfile,
+  switchProfile,
 } from "../storage/profile-store";
 import { getQuestions, saveQuestion } from "../storage/question-store";
 import {
@@ -66,28 +72,29 @@ export const DashboardApp: React.FC = () => {
     return "overview";
   });
 
-  const [activeProfileId, setActiveProfileId] =
-    useState<PresetProfileId>("ankit");
+  const [activeProfileId, setActiveProfileId] = useState<ProfileId>("default");
+  const [allProfiles, setAllProfiles] = useState<Record<ProfileId, UserProfile>>({});
   const [profile, setProfile] = useState<UserProfile>(EMPTY_PROFILE);
   const [questions, setQuestions] = useState<QuestionAnswer[]>([]);
   const [settings, setSettings] =
     useState<ExtensionSettings>(DEFAULT_SETTINGS);
-  const [activeSession, setActiveSession] = useState<AutofillSession | null>(
-    null
-  );
+  const [activeSession, setActiveSession] = useState<AutofillSession | null>(null);
   const [sessionHistory, setSessionHistory] = useState<AutofillSession[]>([]);
   const [loading, setLoading] = useState(true);
+  const [newProfileName, setNewProfileName] = useState("");
 
   const loadAllData = async () => {
-    const [pid, p, q, s, currSess, hist] = await Promise.all([
+    const [pid, p, q, s, currSess, hist, allProfs] = await Promise.all([
       getActiveProfileId(),
       getProfile(),
       getQuestions(),
       getSettings(),
       getActiveSession(),
       getSessionHistory(),
+      getAllProfiles(),
     ]);
     setActiveProfileId(pid);
+    setAllProfiles(allProfs);
     setProfile(p);
     setQuestions(q);
     setSettings(s);
@@ -100,10 +107,89 @@ export const DashboardApp: React.FC = () => {
     void loadAllData();
   }, []);
 
-  const handleSwitchProfile = async (presetId: PresetProfileId) => {
-    const nextProf = await switchPresetProfile(presetId);
-    setActiveProfileId(presetId);
+  const handleSwitchProfile = async (profileId: ProfileId) => {
+    const nextProf = await switchProfile(profileId);
+    setActiveProfileId(profileId);
     setProfile(nextProf);
+  };
+
+  const handleCreateProfile = async () => {
+    if (!newProfileName || !newProfileName.trim()) return;
+    const id = newProfileName.trim().toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const emptyProfile: UserProfile = {
+      personal: {
+        firstName: "",
+        middleName: "",
+        lastName: "",
+        preferredName: "",
+        email: "",
+        phoneCountryCode: "+1",
+        phone: "",
+        addressLine1: "",
+        addressLine2: "",
+        city: "",
+        state: "",
+        postalCode: "",
+        country: "",
+        linkedInUrl: "",
+        githubUrl: "",
+        portfolioUrl: "",
+      },
+      professional: {
+        summary: "",
+        currentJobTitle: "",
+        previousJobTitle: "",
+        currentEmployer: "",
+        previousEmployers: [],
+        totalYearsExperience: "",
+        noticePeriod: "",
+        currentSalary: "",
+        expectedSalary: "",
+        preferredWorkLocation: "",
+        willingToRelocate: true,
+        employmentTypePreference: "Full-time",
+      },
+      education: [],
+      employment: [],
+      skillsAndDocs: {
+        technicalSkills: [],
+        softSkills: [],
+        certifications: [],
+        projects: [],
+        resumeFileName: "",
+        resumeExtractedText: "",
+        coverLetterText: "",
+        otherInformation: "",
+      },
+      updatedAt: Date.now(),
+    };
+    const result = await createProfile(id, emptyProfile);
+    if (result.ok) {
+      setNewProfileName("");
+      setActiveProfileId(id);
+      setProfile(emptyProfile);
+      void loadAllData();
+    }
+  };
+
+  const handleDeleteProfile = async (profileId: ProfileId) => {
+    if (!confirm(`Delete profile "${profileId}"? This cannot be undone.`)) return;
+    const result = await deleteProfile(profileId);
+    if (result.ok) {
+      void loadAllData();
+    }
+  };
+
+  const handleRenameProfile = async (oldId: ProfileId, newName: string) => {
+    if (!newName || !newName.trim()) return;
+    const newId = newName.trim().toLowerCase().replace(/[^a-z0-9]/g, "-");
+    const result = await renameProfile(oldId, newId);
+    if (result.ok) {
+      if (activeProfileId === oldId) {
+        setActiveProfileId(newId);
+      }
+      void loadAllData();
+    }
   };
 
   const switchTab = (tab: DashboardTab) => {
@@ -215,7 +301,7 @@ export const DashboardApp: React.FC = () => {
           </div>
         </div>
 
-        {/* Sidebar 1-Click Candidate Switcher (Profile Ankit / Profile Aman) */}
+        {/* Sidebar Profile Management */}
         <div
           style={{
             background: "#1e293b",
@@ -227,63 +313,124 @@ export const DashboardApp: React.FC = () => {
         >
           <div
             style={{
-              fontSize: 11,
-              fontWeight: 700,
-              color: "#94a3b8",
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              marginBottom: 6,
               display: "flex",
               alignItems: "center",
               gap: 5,
+              marginBottom: 8,
             }}
           >
-            <Users size={13} /> Active Candidate Profile
+            <Users size={13} style={{ color: "#94a3b8" }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              Profiles
+            </span>
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr",
-              gap: 6,
-            }}
-          >
-            {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
-              const isSelected = activeProfileId === pid;
+          <div style={{ marginBottom: 8 }}>
+            {Object.entries(allProfiles).map(([id, prof]) => {
+              const isSelected = id === activeProfileId;
+              const fullName = prof.personal.fullName || `${prof.personal.firstName} ${prof.personal.lastName}`.trim() || id;
               return (
-                <button
-                  key={pid}
-                  type="button"
-                  data-testid={`sidebar-switch-${pid}`}
-                  onClick={() => void handleSwitchProfile(pid)}
-                  style={{
-                    padding: "6px 8px",
-                    borderRadius: 6,
-                    border: isSelected
-                      ? "1.5px solid #3b82f6"
-                      : "1px solid #475569",
-                    background: isSelected ? "#2563eb" : "#0f172a",
-                    color: "#ffffff",
-                    fontSize: 11.5,
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  {PRESET_PROFILES[pid].label}
-                </button>
+                <div key={id} style={{ marginBottom: 6 }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleSwitchProfile(id)}
+                    style={{
+                      width: "100%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "6px 8px",
+                      borderRadius: 6,
+                      border: isSelected ? "1.5px solid #3b82f6" : "1px solid #475569",
+                      background: isSelected ? "#2563eb" : "#0f172a",
+                      color: "#ffffff",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <span>{fullName}</span>
+                    {isSelected && <span style={{ fontSize: 10, opacity: 0.8 }}>Active</span>}
+                  </button>
+                  <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); }}
+                      style={{
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        border: "none",
+                        background: "#334155",
+                        color: "#fff",
+                        fontSize: 10,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleDeleteProfile(id); }}
+                      style={{
+                        padding: "2px 6px",
+                        borderRadius: 4,
+                        border: "none",
+                        background: "#dc2626",
+                        color: "#fff",
+                        fontSize: 10,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
               );
             })}
+            <div style={{ marginTop: 6, padding: "6px 8px", background: "#0f172a", borderRadius: 6, border: "1px solid #334155" }}>
+              <input
+                type="text"
+                value={newProfileName}
+                onChange={(e) => setNewProfileName(e.target.value)}
+                placeholder="New profile name..."
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: 4,
+                  border: "none",
+                  fontSize: 11,
+                  fontFamily: "inherit",
+                  marginBottom: 4,
+                }}
+              />
+              <button
+                type="button"
+                onClick={handleCreateProfile}
+                disabled={!newProfileName.trim()}
+                style={{
+                  width: "100%",
+                  padding: "6px 8px",
+                  borderRadius: 4,
+                  border: "none",
+                  background: newProfileName.trim() ? "#2563eb" : "#475569",
+                  color: "#fff",
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: newProfileName.trim() ? "pointer" : "not-allowed",
+                }}
+              >
+                Create Profile
+              </button>
+            </div>
           </div>
           <div
             style={{
               marginTop: 6,
-              fontSize: 11,
-              color: "#cbd5e1",
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
+              fontSize: 10,
+              color: "#94a3b8",
+              lineHeight: 1.4,
             }}
           >
-            {profile.personal.fullName} • {profile.personal.email}
+            {profile.personal.fullName || profile.personal.firstName || "Unnamed"} • {profile.personal.email || "No email"}
           </div>
         </div>
 
@@ -340,9 +487,7 @@ export const DashboardApp: React.FC = () => {
 
           <button
             type="button"
-            className={`nav-item ${
-              activeTab === "unanswered" ? "active" : ""
-            }`}
+            className={`nav-item ${activeTab === "unanswered" ? "active" : ""}`}
             onClick={() => switchTab("unanswered")}
             data-testid="nav-unanswered-btn"
           >
@@ -415,10 +560,8 @@ export const DashboardApp: React.FC = () => {
                     Workday Smart Autofill — Dashboard
                   </h1>
                   <p className="card-subtitle">
-                    Intelligent multi-step job application autofill with 2
-                    hardcoded ATS resume profiles (<strong>Profile Ankit</strong>{" "}
-                    &amp; <strong>Profile Aman</strong>) and a reusable Workday
-                    Question Bank.
+                    Intelligent multi-step job application autofill with custom
+                    profiles and a reusable Workday Question Bank.
                   </p>
                 </div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -441,7 +584,7 @@ export const DashboardApp: React.FC = () => {
                 </div>
               </div>
 
-              {/* 1-Click Candidate Switcher Banner */}
+              {/* Profile Switcher Cards */}
               <div
                 style={{
                   display: "grid",
@@ -452,19 +595,17 @@ export const DashboardApp: React.FC = () => {
                   borderTop: "1px solid #e2e8f0",
                 }}
               >
-                {(["ankit", "aman"] as PresetProfileId[]).map((pid) => {
-                  const isSelected = activeProfileId === pid;
-                  const meta = PRESET_PROFILES[pid];
+                {Object.entries(allProfiles).map(([id, prof]) => {
+                  const isSelected = id === activeProfileId;
+                  const fullName = prof.personal.fullName || `${prof.personal.firstName} ${prof.personal.lastName}`.trim() || id;
                   return (
                     <div
-                      key={pid}
-                      onClick={() => void handleSwitchProfile(pid)}
+                      key={id}
+                      onClick={() => void handleSwitchProfile(id)}
                       style={{
                         padding: "12px 16px",
                         borderRadius: 10,
-                        border: isSelected
-                          ? "2px solid #2563eb"
-                          : "1px solid #cbd5e1",
+                        border: isSelected ? "2px solid #2563eb" : "1px solid #cbd5e1",
                         background: isSelected ? "#eff6ff" : "#f8fafc",
                         cursor: "pointer",
                         display: "flex",
@@ -480,22 +621,19 @@ export const DashboardApp: React.FC = () => {
                             color: isSelected ? "#1d4ed8" : "#0f172a",
                           }}
                         >
-                          {meta.label} — {meta.profile.personal.fullName}
+                          {fullName}
                         </div>
                         <div style={{ fontSize: 12.5, color: "#475569" }}>
-                          {meta.subtitle}
+                          {prof.personal.email || "No email"}
                         </div>
                         <div style={{ fontSize: 12, color: "#64748b" }}>
-                          {meta.email} • +91 {meta.profile.personal.phone} • GPA:{" "}
-                          {meta.profile.education[0]?.gpa}
+                          {prof.professional.currentJobTitle || "No title"} • {prof.personal.city || ""}, {prof.personal.country || ""}
                         </div>
                       </div>
                       <span
-                        className={`badge ${
-                          isSelected ? "badge-blue" : "badge-gray"
-                        }`}
+                        className={`badge ${isSelected ? "badge-blue" : "badge-gray"}`}
                       >
-                        {isSelected ? "ACTIVE PROFILE" : "Switch to Profile"}
+                        {isSelected ? "ACTIVE" : "Switch"}
                       </span>
                     </div>
                   );
@@ -506,12 +644,12 @@ export const DashboardApp: React.FC = () => {
             {/* KPI Cards */}
             <div className="grid-4" style={{ marginBottom: 20 }}>
               <div className="stat-card">
-                <span className="stat-label">Active Candidate Profile</span>
-                <span className="stat-value" style={{ color: "#2563eb", fontSize: 22 }}>
-                  {PRESET_PROFILES[activeProfileId].label}
+                <span className="stat-label">Active Profile</span>
+                <span className="stat-value" style={{ color: "#2563eb", fontSize: 18 }}>
+                  {profile.personal.fullName || profile.personal.firstName || activeProfileId}
                 </span>
                 <span style={{ fontSize: 12, color: "#64748b" }}>
-                  {profile.personal.firstName} {profile.personal.lastName} ({completion.percentage}% complete)
+                  ({completion.percentage}% complete)
                 </span>
               </div>
 
@@ -521,8 +659,7 @@ export const DashboardApp: React.FC = () => {
                   {questions.length}
                 </span>
                 <span style={{ fontSize: 12, color: "#64748b" }}>
-                  {questions.filter((q) => q.enabled).length} enabled for
-                  autofill
+                  {questions.filter((q) => q.enabled).length} enabled for autofill
                 </span>
               </div>
 
@@ -542,8 +679,7 @@ export const DashboardApp: React.FC = () => {
                   {activeSession?.status || "Idle / Ready"}
                 </span>
                 <span style={{ fontSize: 12, color: "#64748b" }}>
-                  {activeSession?.currentStep ||
-                    "Open a Workday page or Simulator"}
+                  {activeSession?.currentStep || "Open a Workday page or Simulator"}
                 </span>
               </div>
 
@@ -571,7 +707,7 @@ export const DashboardApp: React.FC = () => {
               <div className="card">
                 <div className="card-header">
                   <h2 className="card-title">
-                    Active Candidate Details ({PRESET_PROFILES[activeProfileId].label})
+                    Active Profile Details
                   </h2>
                   <button
                     type="button"
@@ -583,31 +719,22 @@ export const DashboardApp: React.FC = () => {
                 </div>
                 <div style={{ fontSize: 13.5, lineHeight: 1.8 }}>
                   <div>
-                    <strong>Name:</strong> {profile.personal.firstName}{" "}
-                    {profile.personal.middleName} {profile.personal.lastName}
+                    <strong>Name:</strong> {profile.personal.firstName} {profile.personal.middleName} {profile.personal.lastName}
                   </div>
                   <div>
                     <strong>Email:</strong> {profile.personal.email}
                   </div>
                   <div>
-                    <strong>Phone:</strong> {profile.personal.phoneCountryCode}{" "}
-                    {profile.personal.phone}
+                    <strong>Phone:</strong> {profile.personal.phoneCountryCode} {profile.personal.phone}
                   </div>
                   <div>
-                    <strong>Location:</strong> {profile.personal.city},{" "}
-                    {profile.personal.state} {profile.personal.postalCode},{" "}
-                    {profile.personal.country}
+                    <strong>Location:</strong> {profile.personal.city}, {profile.personal.state} {profile.personal.postalCode}, {profile.personal.country}
                   </div>
                   <div>
-                    <strong>Current Role:</strong>{" "}
-                    {profile.professional.currentJobTitle} at{" "}
-                    {profile.professional.currentEmployer}
+                    <strong>Current Role:</strong> {profile.professional.currentJobTitle} at {profile.professional.currentEmployer}
                   </div>
                   <div>
-                    <strong>Education:</strong> {profile.education[0]?.degree} in{" "}
-                    {profile.education[0]?.fieldOfStudy} —{" "}
-                    {profile.education[0]?.institution} (GPA:{" "}
-                    {profile.education[0]?.gpa})
+                    <strong>Education:</strong> {profile.education[0]?.degree} in {profile.education[0]?.fieldOfStudy} — {profile.education[0]?.institution} (GPA: {profile.education[0]?.gpa})
                   </div>
                   <div>
                     <strong>Links:</strong>{" "}
@@ -630,9 +757,7 @@ export const DashboardApp: React.FC = () => {
                   </div>
                   <div>
                     <strong>Skills:</strong>{" "}
-                    {profile.skillsAndDocs.technicalSkills
-                      .slice(0, 9)
-                      .join(", ")}
+                    {profile.skillsAndDocs.technicalSkills.slice(0, 9).join(", ")}
                   </div>
                 </div>
               </div>
@@ -682,12 +807,10 @@ export const DashboardApp: React.FC = () => {
                       >
                         <div>
                           <div style={{ fontWeight: 600, fontSize: 14 }}>
-                            {sess.jobTitle || "Workday Application"} —{" "}
-                            {sess.companyName}
+                            {sess.jobTitle || "Workday Application"} — {sess.companyName}
                           </div>
                           <div style={{ fontSize: 12, color: "#64748b" }}>
-                            Step: {sess.currentStep} • {filled} filled /{" "}
-                            {sess.results.length} detected
+                            Step: {sess.currentStep} • {filled} filled / {sess.results.length} detected
                           </div>
                         </div>
                         <span

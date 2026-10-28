@@ -1,16 +1,15 @@
-import { PresetProfileId, PRESET_PROFILES } from "../shared/sample-data";
 import { AnswerType, AutofillSession } from "../shared/types";
 import { escapeHtml } from "../shared/validation";
 import {
   getActiveProfileId,
-  switchPresetProfile,
+  getAllProfiles,
+  switchProfile,
 } from "../storage/profile-store";
 import { AutofillSessionController } from "./session-controller";
 
 /**
  * Non-intrusive, collapsible, repositionable in-page Application Status Panel
- * for Workday job application pages. Includes a 1-click Profile Switcher
- * between Profile Ankit and Profile Aman.
+ * for Workday job application pages. Shows active profile and autofill status.
  */
 export class FloatingStatusPanel {
   private container: HTMLElement | null = null;
@@ -18,7 +17,7 @@ export class FloatingStatusPanel {
   private corner: "bottom-right" | "bottom-left" = "bottom-right";
   private showUnansweredDrawer = false;
   private showReviewDrawer = false;
-  private activeProfileId: PresetProfileId = "ankit";
+  private activeProfileId: string = "default";
 
   constructor(private readonly controller: AutofillSessionController) {}
 
@@ -37,6 +36,13 @@ export class FloatingStatusPanel {
     void getActiveProfileId().then((pid) => {
       this.activeProfileId = pid;
       this.render(this.controller.getCurrentSession());
+    });
+
+    void getAllProfiles().then((profiles) => {
+      const prof = profiles[this.activeProfileId];
+      if (prof) {
+        this.activeProfileId = this.activeProfileId;
+      }
     });
 
     this.controller.subscribe((session) => {
@@ -182,9 +188,6 @@ export class FloatingStatusPanel {
       `
         : "";
 
-    const isAnkit = this.activeProfileId === "ankit";
-    const isAman = this.activeProfileId === "aman";
-
     this.container.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#0f172a;color:#ffffff;border-radius:11px 11px 0 0;">
         <div style="display:flex;align-items:center;gap:8px;">
@@ -192,35 +195,17 @@ export class FloatingStatusPanel {
           <strong style="font-size:13.5px;">Workday Smart Autofill</strong>
         </div>
         <div style="display:flex;gap:6px;">
-          <button data-wsa-action="toggle-corner" title="Move panel left/right" style="background:rgba(255,255,255,0.12);border:none;color:#e2e8f0;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">⇄</button>
-          <button data-wsa-action="toggle-collapse" title="Collapse panel" style="background:rgba(255,255,255,0.12);border:none;color:#e2e8f0;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">—</button>
+          <button data-wsa-action="toggle-corner" title="Move panel left/right" style="background:rgba(255,255,255,0.12);border:none;color:#e2e8f0;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">&#8596;</button>
+          <button data-wsa-action="toggle-collapse" title="Collapse panel" style="background:rgba(255,255,255,0.12);border:none;color:#e2e8f0;border-radius:4px;padding:2px 6px;font-size:11px;cursor:pointer;">&#8212;</button>
         </div>
       </div>
 
       <div style="padding:12px 14px;">
-        <!-- 1-Click Candidate Profile Switcher -->
+        <!-- Active Profile -->
         <div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:10px;">
           <div style="font-size:10.5px;font-weight:700;color:#475569;text-transform:uppercase;margin-bottom:5px;display:flex;justify-content:space-between;">
             <span>Active Profile</span>
-            <span style="color:#2563eb;">${escapeHtml(
-              PRESET_PROFILES[this.activeProfileId].label
-            )}</span>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
-            <button data-wsa-action="switch-profile" data-profile="ankit" style="padding:5px 8px;border-radius:6px;border:${
-              isAnkit ? "2px solid #2563eb" : "1px solid #cbd5e1"
-            };background:${isAnkit ? "#eff6ff" : "#ffffff"};color:${
-      isAnkit ? "#1d4ed8" : "#334155"
-    };font-weight:600;font-size:11.5px;cursor:pointer;">
-              Profile Ankit
-            </button>
-            <button data-wsa-action="switch-profile" data-profile="aman" style="padding:5px 8px;border-radius:6px;border:${
-              isAman ? "2px solid #2563eb" : "1px solid #cbd5e1"
-            };background:${isAman ? "#eff6ff" : "#ffffff"};color:${
-      isAman ? "#1d4ed8" : "#334155"
-    };font-weight:600;font-size:11.5px;cursor:pointer;">
-              Profile Aman
-            </button>
+            <span style="color:#2563eb;">${escapeHtml(this.activeProfileId)}</span>
           </div>
         </div>
 
@@ -257,9 +242,7 @@ export class FloatingStatusPanel {
             <div style="font-size:10.5px;color:#1e40af;">Matched</div>
           </div>
           <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:6px;">
-            <div style="font-size:16px;font-weight:700;color:#d97706;">${
-              unansweredList.length
-            }</div>
+            <div style="font-size:16px;font-weight:700;color:#d97706;">${unansweredList.length}</div>
             <div style="font-size:10.5px;color:#92400e;">Unanswered</div>
           </div>
           <div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:6px;">
@@ -326,11 +309,13 @@ export class FloatingStatusPanel {
               this.corner === "bottom-right" ? "bottom-left" : "bottom-right";
             this.render(this.controller.getCurrentSession());
           } else if (action === "switch-profile") {
-            const pid = (btn.getAttribute("data-profile") ||
-              "ankit") as PresetProfileId;
-            this.activeProfileId = pid;
-            await switchPresetProfile(pid);
-            this.render(this.controller.getCurrentSession());
+            // Profile switching now managed via dashboard
+            if (typeof chrome !== "undefined" && chrome.runtime?.sendMessage) {
+              chrome.runtime.sendMessage({
+                type: "OPEN_DASHBOARD_TAB",
+                payload: { tab: "profile" },
+              });
+            }
           } else if (action === "start-autofill") {
             await this.controller.startAutofill();
           } else if (action === "fill-step") {

@@ -5,16 +5,17 @@ import { SAMPLE_PROFILE, SAMPLE_QUESTIONS } from "../../src/shared/sample-data";
 import { QuestionAnswer } from "../../src/shared/types";
 
 describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
-  it("matches exact questions and handles case, whitespace, and punctuation differences", () => {
+  it("matches exact questions and handles case, whitespace, and punctuation differences", async () => {
     const raw =
       "  Are you   legally authorized to work in the United States?! * (Required) ";
-    const res = evaluateFieldMatch(
+    const res = await evaluateFieldMatch(
       {
         questionText: raw,
         normalizedQuestion: normalizeQuestion(raw),
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: true,
+        availableChoices: [],
       },
       SAMPLE_QUESTIONS,
       SAMPLE_PROFILE
@@ -25,15 +26,16 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
     expect(res.proposedValue).toBe("Yes");
   });
 
-  it("matches saved alternative question phrasings with high confidence", () => {
+  it("matches saved alternative question phrasings with high confidence", async () => {
     const phrasing = "Do you have legal authorization to work in the US?";
-    const res = evaluateFieldMatch(
+    const res = await evaluateFieldMatch(
       {
         questionText: phrasing,
         normalizedQuestion: normalizeQuestion(phrasing),
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: true,
+        availableChoices: [],
       },
       SAMPLE_QUESTIONS,
       SAMPLE_PROFILE
@@ -44,31 +46,33 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
     expect(res.proposedValue).toBe("Yes");
   });
 
-  it("distinguishes similar questions with different meanings (work authorization vs visa sponsorship)", () => {
+  it("distinguishes similar questions with different meanings (work authorization vs visa sponsorship)", async () => {
     const workAuthQ =
       "Are you legally authorized to work in the United States for any employer?";
     const sponsorshipQ =
       "Will you now or in the future require visa sponsorship to work in the United States?";
 
-    const resAuth = evaluateFieldMatch(
+    const resAuth = await evaluateFieldMatch(
       {
         questionText: workAuthQ,
         normalizedQuestion: normalizeQuestion(workAuthQ),
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: true,
+        availableChoices: [],
       },
       SAMPLE_QUESTIONS,
       SAMPLE_PROFILE
     );
 
-    const resSponsor = evaluateFieldMatch(
+    const resSponsor = await evaluateFieldMatch(
       {
         questionText: sponsorshipQ,
         normalizedQuestion: normalizeQuestion(sponsorshipQ),
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: true,
+        availableChoices: [],
       },
       SAMPLE_QUESTIONS,
       SAMPLE_PROFILE
@@ -81,13 +85,13 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
     expect(resSponsor.proposedValue).toBe("No");
   });
 
-  it("ignores disabled Question Bank entries and marks missing answers as unanswered", () => {
+  it("ignores disabled Question Bank entries and marks missing answers as unanswered", async () => {
     const disabledList: QuestionAnswer[] = SAMPLE_QUESTIONS.map((q) => ({
       ...q,
       enabled: false,
     }));
 
-    const resDisabled = evaluateFieldMatch(
+    const resDisabled = await evaluateFieldMatch(
       {
         questionText: "Are you legally authorized to work in the United States?",
         normalizedQuestion: normalizeQuestion(
@@ -96,6 +100,7 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: true,
+        availableChoices: [],
       },
       disabledList,
       SAMPLE_PROFILE
@@ -105,13 +110,14 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
 
     const unknownQ =
       "Please provide your active security clearance polygraph adjudication number";
-    const resMissing = evaluateFieldMatch(
+    const resMissing = await evaluateFieldMatch(
       {
         questionText: unknownQ,
         normalizedQuestion: normalizeQuestion(unknownQ),
         inputType: "text",
         isLegalDeclaration: false,
         isSensitive: false,
+        availableChoices: [],
       },
       SAMPLE_QUESTIONS,
       SAMPLE_PROFILE
@@ -121,7 +127,7 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
     expect(resMissing.proposedValue).toBeUndefined();
   });
 
-  it("flags ambiguous questions when two enabled entries with different answers match equally", () => {
+  it("flags ambiguous questions when two enabled entries with different answers match equally", async () => {
     const conflictingQuestions: QuestionAnswer[] = [
       {
         id: "conflict-1",
@@ -156,13 +162,14 @@ describe("Phase 5: Smart Question Matching & Confidence Engine", () => {
     ];
 
     const query = "Do you work weekend on-call shifts?";
-    const res = evaluateFieldMatch(
+    const res = await evaluateFieldMatch(
       {
         questionText: query,
         normalizedQuestion: normalizeQuestion(query),
         inputType: "radio",
         isLegalDeclaration: false,
         isSensitive: false,
+        availableChoices: [],
       },
       conflictingQuestions,
       SAMPLE_PROFILE

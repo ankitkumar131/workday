@@ -1178,3 +1178,110 @@ function extractCustomDropdownCurrentValue(el: HTMLElement): string {
   }
   return text;
 }
+
+/**
+ * Detects generic "Add Another" / "+" buttons across any portal.
+ * Used by SectionReplicator to expand repeatable sections before field detection.
+ */
+export interface GenericAddButton {
+  element: HTMLElement;
+  sectionType: "experience" | "education" | "skills" | "certifications" | "projects" | "general";
+  score: number;
+  text: string;
+}
+
+export function detectGenericAddButtons(
+  root: Document | HTMLElement = document
+): GenericAddButton[] {
+  const buttons: GenericAddButton[] = [];
+  const allButtons = Array.from(
+    root.querySelectorAll<HTMLElement>("button, [role='button'], a[role='button']")
+  );
+
+  const sectionKeywords: Record<string, string[]> = {
+    experience: ["experience", "employment", "job", "work", "position", "role"],
+    education: ["education", "school", "degree", "university", "college"],
+    skills: ["skill", "technology", "expertise"],
+    certifications: ["certification", "certificate", "credential"],
+    projects: ["project", "portfolio"],
+  };
+
+  for (const btn of allButtons) {
+    if (!btn.isConnected) continue;
+    if (btn.closest("#wsa-floating-status-panel, [data-wsa-ignore='true']")) {
+      continue;
+    }
+
+    const style = window.getComputedStyle(btn);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.opacity === "0" ||
+      (btn.offsetWidth === 0 && btn.offsetHeight === 0)
+    ) {
+      continue;
+    }
+
+    let score = 0;
+    let detectedSection: GenericAddButton["sectionType"] = "general";
+    const text = (btn.textContent || "").trim().toLowerCase();
+    const ariaLabel = (btn.getAttribute("aria-label") || "").toLowerCase();
+    const title = (btn.getAttribute("title") || "").toLowerCase();
+    const autoId = (btn.getAttribute("data-automation-id") || "").toLowerCase();
+    const classes = (btn.className || "").toLowerCase();
+    const combined = `${text} ${ariaLabel} ${title} ${autoId} ${classes}`;
+
+    // Plus sign / generic add
+    if (/^\+$/.test(text)) score += 2;
+    if (/^add$/i.test(text)) score += 1;
+    if (/add|create|new|another|plus|append/i.test(combined)) score += 2;
+
+    // Section-specific keyword scoring
+    for (const [section, keywords] of Object.entries(sectionKeywords)) {
+      for (const kw of keywords) {
+        if (combined.includes(kw)) {
+          score += 3;
+          detectedSection = section as GenericAddButton["sectionType"];
+        }
+      }
+    }
+
+    // Structural: button is inside/next to a repeating section container
+    const parent = btn.parentElement;
+    if (parent) {
+      const inputCount = parent.querySelectorAll("input, select, textarea").length;
+      if (inputCount > 0) score += 1;
+
+      const heading = parent
+        .closest("div, section, fieldset")
+        ?.querySelector("h2, h3, h4, legend");
+      if (heading) {
+        const hText = (heading.textContent || "").toLowerCase();
+        for (const [section, keywords] of Object.entries(sectionKeywords)) {
+          if (keywords.some((kw) => hText.includes(kw))) {
+            score += 3;
+            detectedSection = section as GenericAddButton["sectionType"];
+          }
+        }
+      }
+    }
+
+    // Icon-only + button
+    if (btn.querySelector("svg, i") && /^\+$|^add$/i.test(text)) {
+      score += 2;
+    }
+
+    if (score > 0) {
+      buttons.push({
+        element: btn,
+        sectionType: detectedSection,
+        score,
+        text: btn.textContent?.trim() || "",
+      });
+    }
+  }
+
+  // Sort by score descending
+  buttons.sort((a, b) => b.score - a.score);
+  return buttons;
+}
